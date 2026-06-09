@@ -93,12 +93,37 @@ docker attach luanti-aliveworld
 /aw_event_reset        # delete all world events and rumors
 /aw_rumors             # list all active rumors
 /aw_rumor <id>         # detailed info about a rumor
+/aw_sites              # list all active sites
+/aw_site <id>          # detailed info about a site
+/aw_sites_init         # create initial settlement sites
+/aw_sites_reset        # delete and recreate sites
+/aw_sites_near <x> <y> <z> [limit]  # nearest active sites from position
+/aw_site_debug <id>    # full site debug info with player distances
+/aw_whereami [player]  # player coords + nearest sites
+/aw_compass <player> <site>  # direction/distance from player to site
+
+### Reality Anchoring & Physical Event Markers
+
+Admin commands (`aliveworld_world`):
+
+/aw_anchor_site <site_id>          # place physical marker for a site
+/aw_anchor_near <player> [radius]  # anchor sites near player
+/aw_markers                        # list all placed markers
+/aw_marker <id>                    # detailed marker info
+/aw_materialize_site <site_id>     # materialize site as physical POI
+/aw_materialize_event <event_id>   # materialize event site
+/aw_materialize_near <player> [radius]  # materialize events near player
+/aw_markers_reset confirm          # clear marker registry (keeps nodes)
 
 ### Player commands (in-game, aliveworld_player, requires `interact`)
 
 /aw_news               # show active rumors (formspec)
 /aw_world              # show world state overview (formspec)
 /aw_chronicle_read     # read recent chronicle entries (formspec)
+/aw_places             # list known settlement sites with direction/distance
+/aw_place <id>         # detailed info about a place
+/aw_near               # nearest active sites from player position
+/aw_investigate        # search for event traces nearby
 /aw_help               # command help
 ```
 

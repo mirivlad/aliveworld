@@ -21,6 +21,19 @@ local function has_bridge()
   return aliveworld and aliveworld.bridge and aliveworld.bridge.get_environment_profile
 end
 
+local function has_sites()
+  return aliveworld and aliveworld.sites and aliveworld.sites.list
+end
+
+local function get_player_pos(player_name)
+  if not player_name then return nil end
+  local player = minetest.get_player_by_name(player_name)
+  if not player then return nil end
+  local pos = player:get_pos()
+  if not pos then return nil end
+  return {x = pos.x, y = pos.y, z = pos.z}
+end
+
 -- Text helpers
 
 function aliveworld_player.get_display_text(obj)
@@ -77,7 +90,7 @@ end
 
 -- show_news: active rumors
 
-function aliveworld_player.show_news(player_name)
+function aliveworld_player.show_news(player_name, player_pos)
   local lines = {}
 
   table.insert(lines, "=== Новости мира ===")
@@ -103,7 +116,21 @@ function aliveworld_player.show_news(player_name)
       table.insert(lines, string.format("=== Активные слухи (%d) ===", #active))
       table.insert(lines, "")
       for _, r in ipairs(active) do
-        table.insert(lines, string.format("• %s", aliveworld_player.get_display_text(r)))
+        local text = aliveworld_player.get_display_text(r)
+        if has_sites() and player_pos and r.event_id then
+          local site = aliveworld.sites.find_by_event(r.event_id)
+          if site and site.status == "active" then
+            local phys = site.physical_status or "abstract"
+            if phys == "anchored" or phys == "materialized" then
+              local direction = aliveworld.sites.format_direction_ru(player_pos, site.pos)
+              text = text .. " — " .. direction
+            else
+              local dir = aliveworld.sites.direction_name_ru(player_pos, site.pos)
+              text = text .. " — место пока не отмечено, слух указывает примерное направление: " .. dir
+            end
+          end
+        end
+        table.insert(lines, string.format("• %s", text))
         table.insert(lines, string.format("  Истекает на день %d", r.expires_day))
         table.insert(lines, "")
       end
@@ -147,6 +174,16 @@ function aliveworld_player.show_world(player_name)
     end
   end
   table.insert(lines, string.format("Активные слухи: %d", rumors_count))
+
+  local places_count = 0
+  if has_sites() then
+    for _, s in ipairs(aliveworld.sites.list()) do
+      if s.type == "settlement" and s.status == "active" then
+        places_count = places_count + 1
+      end
+    end
+  end
+  table.insert(lines, string.format("Известные места: %d", places_count))
   table.insert(lines, "")
 
   if has_bridge() then
@@ -216,6 +253,184 @@ function aliveworld_player.show_chronicle(player_name)
   show_formspec(player_name, "aliveworld_player:chronicle", "Летопись", table.concat(lines, "\n"))
 end
 
+-- show_places: list known settlement sites
+
+function aliveworld_player.show_places(player_name)
+  local lines = {}
+  table.insert(lines, "=== Известные места ===")
+  table.insert(lines, "")
+
+  if not has_sites() then
+    table.insert(lines, "Модуль мест недоступен.")
+    show_formspec(player_name, "aliveworld_player:places", "Известные места", table.concat(lines, "\n"))
+    return
+  end
+
+  local places = aliveworld.sites.get_places_for_player(player_name)
+  if #places == 0 then
+    table.insert(lines, "Нет известных мест.")
+  else
+    for _, p in ipairs(places) do
+      table.insert(lines, string.format("• %s (%s)", p.name, p.type_name))
+      if p.physical_status == "anchored" or p.physical_status == "materialized" then
+        table.insert(lines, string.format("  %s, %d блоков — место отмечено", p.dir, p.dist))
+      else
+        table.insert(lines, string.format("  Известно только по слухам, место ещё не отмечено"))
+      end
+      table.insert(lines, "")
+    end
+  end
+
+  show_formspec(player_name, "aliveworld_player:places", "Известные места", table.concat(lines, "\n"))
+end
+
+-- show_place_detail: detailed info about a specific site
+
+function aliveworld_player.show_place_detail(player_name, site_id)
+  local lines = {}
+  table.insert(lines, "=== Место ===")
+  table.insert(lines, "")
+
+  if not has_sites() then
+    table.insert(lines, "Модуль мест недоступен.")
+    show_formspec(player_name, "aliveworld_player:place", "Место", table.concat(lines, "\n"))
+    return
+  end
+
+  local details = aliveworld.sites.get_place_details(player_name, site_id)
+  if not details then
+    table.insert(lines, "Место не найдено.")
+    show_formspec(player_name, "aliveworld_player:place", "Место", table.concat(lines, "\n"))
+    return
+  end
+
+  local site = details.site
+  local type_name = ""
+  if site.type == "settlement" then
+    type_name = (site.subtype == "village" and "деревня") or (site.subtype == "outpost" and "форпост") or site.subtype
+  elseif site.type == "event" then
+    type_name = "событие"
+  end
+
+  table.insert(lines, string.format("Название: %s", site.name))
+  table.insert(lines, string.format("Тип: %s", type_name))
+  if details.dist and details.dir then
+    table.insert(lines, string.format("Направление: %s, %d блоков", details.dir, details.dist))
+  end
+  table.insert(lines, "")
+
+  if site.type == "settlement" then
+    if site.settlement_id and has_settlements() then
+      local settlement = aliveworld.settlements.get(site.settlement_id)
+      if settlement then
+        table.insert(lines, string.format("Население: %d", settlement.population))
+        table.insert(lines, string.format("Состояние: %s", settlement.status))
+        local status_ru = {stable = "стабильно", hungry = "голодает", unsafe = "небезопасно", struggling = "в упадке", abandoned = "заброшено"}
+        table.insert(lines, string.format("Статус: %s", status_ru[settlement.status] or settlement.status))
+      end
+    end
+  elseif site.type == "event" then
+    if site.event_id and has_events() then
+      local event = aliveworld.events.get(site.event_id)
+      if event then
+        table.insert(lines, string.format("Событие: %s", event.text_ru or event.text_en))
+        table.insert(lines, string.format("Острота: %s", event.severity))
+      end
+    end
+  end
+
+  show_formspec(player_name, "aliveworld_player:place", "Место", table.concat(lines, "\n"))
+end
+
+-- show_near: nearest active sites from player
+
+function aliveworld_player.show_near(player_name)
+  local lines = {}
+  table.insert(lines, "=== Ближайшие места ===")
+  table.insert(lines, "")
+
+  if not has_sites() then
+    table.insert(lines, "Модуль мест недоступен.")
+    show_formspec(player_name, "aliveworld_player:near", "Ближайшие места", table.concat(lines, "\n"))
+    return
+  end
+
+  local near = aliveworld.sites.get_near_for_player(player_name, 5)
+  if #near == 0 then
+    table.insert(lines, "Рядом нет известных мест.")
+  else
+    for _, n in ipairs(near) do
+      table.insert(lines, string.format("• %s (%s)", n.name, n.type_label))
+      if n.physical_status == "anchored" or n.physical_status == "materialized" then
+        table.insert(lines, string.format("  %s, %d блоков — отмечено", n.dir, n.dist))
+      else
+        table.insert(lines, string.format("  %s, %d блоков — не отмечено", n.dir, n.dist))
+      end
+      table.insert(lines, "")
+    end
+  end
+
+  show_formspec(player_name, "aliveworld_player:near", "Ближайшие места", table.concat(lines, "\n"))
+end
+
+-- show_investigate: find nearby event sites to investigate
+
+function aliveworld_player.show_investigate(player_name)
+  local lines = {}
+  table.insert(lines, "=== Исследовать ===")
+  table.insert(lines, "")
+
+  if not has_sites() then
+    table.insert(lines, "Модуль мест недоступен.")
+    show_formspec(player_name, "aliveworld_player:investigate", "Исследовать", table.concat(lines, "\n"))
+    return
+  end
+
+  local player_pos = get_player_pos(player_name)
+  if not player_pos then
+    table.insert(lines, "Не могу определить ваше положение.")
+    show_formspec(player_name, "aliveworld_player:investigate", "Исследовать", table.concat(lines, "\n"))
+    return
+  end
+
+  local near = aliveworld.sites.nearest(player_pos, 5)
+  local event_sites = {}
+  for _, s in ipairs(near) do
+    if s.type == "event" and s.status == "active" then
+      table.insert(event_sites, s)
+    end
+  end
+
+  if #event_sites == 0 then
+    table.insert(lines, "Рядом нет активных событий.")
+  else
+    table.insert(lines, string.format("Найдено мест событий рядом: %d", #event_sites))
+    table.insert(lines, "")
+    for _, s in ipairs(event_sites) do
+      local dist = aliveworld.sites.distance(player_pos, s.pos)
+      local dir = aliveworld.sites.direction_name_ru(player_pos, s.pos)
+      local phys = s.physical_status or "abstract"
+      table.insert(lines, string.format("• %s", s.name))
+      table.insert(lines, string.format("  %s, %d блоков", dir, dist))
+      if phys == "anchored" or phys == "materialized" then
+        table.insert(lines, "  Следы события уже замечены в мире.")
+      else
+        table.insert(lines, "  Ищи следы события поблизости.")
+      end
+
+      if s.event_id and has_events() then
+        local ev = aliveworld.events.get(s.event_id)
+        if ev then
+          table.insert(lines, string.format("  Слух: %s", aliveworld_player.get_display_text(ev)))
+        end
+      end
+      table.insert(lines, "")
+    end
+  end
+
+  show_formspec(player_name, "aliveworld_player:investigate", "Исследовать", table.concat(lines, "\n"))
+end
+
 -- Chat commands
 
 minetest.register_chatcommand("aw_news", {
@@ -226,7 +441,8 @@ minetest.register_chatcommand("aw_news", {
     if not player_name or player_name == "" then
       return false, "Используйте /aw_news в игре."
     end
-    aliveworld_player.show_news(player_name)
+    local player_pos = get_player_pos(player_name)
+    aliveworld_player.show_news(player_name, player_pos)
     return true, "Открываю новости мира..."
   end,
 })
@@ -267,10 +483,69 @@ minetest.register_chatcommand("aw_help", {
     table.insert(lines, "/aw_news — показать активные слухи")
     table.insert(lines, "/aw_world — показать состояние мира")
     table.insert(lines, "/aw_chronicle_read — прочитать летопись")
+    table.insert(lines, "/aw_places — список известных мест")
+    table.insert(lines, "/aw_place <id> — подробно о месте")
+    table.insert(lines, "/aw_near — ближайшие места")
+    table.insert(lines, "/aw_investigate — поиск следов событий рядом")
     table.insert(lines, "/aw_help — эта справка")
     table.insert(lines, "")
     table.insert(lines, "Установите Доску слухов в мире для быстрого доступа к новостям.")
     return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_places", {
+  params = "",
+  description = "Список известных мест",
+  privs = {interact = true},
+  func = function(player_name)
+    if not player_name or player_name == "" then
+      return false, "Используйте /aw_places в игре."
+    end
+    aliveworld_player.show_places(player_name)
+    return true, "Открываю список мест..."
+  end,
+})
+
+minetest.register_chatcommand("aw_place", {
+  params = "<id>",
+  description = "Показать подробную информацию о месте",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not player_name or player_name == "" then
+      return false, "Используйте /aw_place в игре."
+    end
+    if not param or param == "" then
+      return false, "Укажите id места. Используйте /aw_places для списка."
+    end
+    aliveworld_player.show_place_detail(player_name, param)
+    return true, "Открываю информацию о месте..."
+  end,
+})
+
+minetest.register_chatcommand("aw_near", {
+  params = "",
+  description = "Показать ближайшие места",
+  privs = {interact = true},
+  func = function(player_name)
+    if not player_name or player_name == "" then
+      return false, "Используйте /aw_near в игре."
+    end
+    aliveworld_player.show_near(player_name)
+    return true, "Открываю ближайшие места..."
+  end,
+})
+
+minetest.register_chatcommand("aw_investigate", {
+  params = "",
+  description = "Поиск следов событий рядом",
+  privs = {interact = true},
+  func = function(player_name)
+    if not player_name or player_name == "" then
+      return false, "Используйте /aw_investigate в игре."
+    end
+    aliveworld_player.show_investigate(player_name)
+    return true, "Ищу следы событий..."
   end,
 })
 
@@ -304,7 +579,9 @@ minetest.register_node("aliveworld_player:rumor_board", {
     if not clicker or not clicker:is_player() then
       return itemstack
     end
-    aliveworld_player.show_news(clicker:get_player_name())
+    local player_pos = clicker:get_pos()
+    aliveworld_player.show_news(clicker:get_player_name(),
+      player_pos and {x = player_pos.x, y = player_pos.y, z = player_pos.z})
     return itemstack
   end,
 })

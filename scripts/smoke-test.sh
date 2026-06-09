@@ -256,6 +256,162 @@ if ! grep -q "load_mod_aliveworld_player" "$ROOT/data/worlds/aliveworld/world.mt
   exit 1
 fi
 
+# Sites module checks
+if ! [ -f "$ROOT/local_mods/aliveworld_core/sites.lua" ]; then
+  echo "aliveworld_core must have sites.lua"
+  exit 1
+fi
+
+if ! grep -q "aliveworld.sites" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must set up aliveworld.sites"
+  exit 1
+fi
+
+if ! grep -q "sites.lua" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must dofile sites.lua"
+  exit 1
+fi
+
+if ! grep -q "ensure_initial_settlement_sites" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must call ensure_initial_settlement_sites"
+  exit 1
+fi
+
+if ! grep -q "create_event_site" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must call create_event_site in tick"
+  exit 1
+fi
+
+if ! grep -q "/aw_sites" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_sites"
+  exit 1
+fi
+
+if ! grep -q "/aw_places" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_places"
+  exit 1
+fi
+
+if ! grep -q "/aw_near" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_near"
+  exit 1
+fi
+
+if ! grep -q "aw_sites" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_sites command"
+  exit 1
+fi
+
+if ! grep -q "aw_sites_reset" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_sites_reset command"
+  exit 1
+fi
+
+if ! grep -q "aw_places" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_places command"
+  exit 1
+fi
+
+if ! grep -q "aw_near" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_near command"
+  exit 1
+fi
+
+# AliveWorld World mod checks
+required_files+=(
+  "local_mods/aliveworld_world/mod.conf"
+  "local_mods/aliveworld_world/init.lua"
+)
+
+if ! [ -f "$ROOT/local_mods/aliveworld_world/mod.conf" ]; then
+  echo "aliveworld_world must have mod.conf"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_world/init.lua" ]; then
+  echo "aliveworld_world must have init.lua"
+  exit 1
+fi
+
+if ! grep -q "aliveworld.materialization" "$ROOT/local_mods/aliveworld_world/init.lua"; then
+  echo "aliveworld_world must set up aliveworld.materialization"
+  exit 1
+fi
+
+if ! grep -q "load_mod_aliveworld_world" "$ROOT/data/worlds/aliveworld/world.mt"; then
+  echo "world.mt must have load_mod_aliveworld_world = true"
+  exit 1
+fi
+
+# Reality Anchoring checks
+if ! grep -q "physical_status" "$ROOT/local_mods/aliveworld_core/sites.lua"; then
+  echo "sites.lua must have physical_status field"
+  exit 1
+fi
+
+if ! grep -q "anchor_site" "$ROOT/local_mods/aliveworld_core/sites.lua"; then
+  echo "sites.lua must have anchor_site function"
+  exit 1
+fi
+
+if ! grep -q "aw_site_debug" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_site_debug command"
+  exit 1
+fi
+
+if ! grep -q "aw_whereami" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_whereami command"
+  exit 1
+fi
+
+if ! grep -q "aw_compass" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_compass command"
+  exit 1
+fi
+
+# Materialization checks
+if ! grep -q "materialize_site" "$ROOT/local_mods/aliveworld_world/init.lua"; then
+  echo "aliveworld_world must have materialize_site command"
+  exit 1
+fi
+
+if ! grep -q "materialize_near" "$ROOT/local_mods/aliveworld_world/init.lua"; then
+  echo "aliveworld_world must have materialize_near command"
+  exit 1
+fi
+
+if ! grep -q "aw_markers" "$ROOT/local_mods/aliveworld_world/init.lua"; then
+  echo "aliveworld_world must register /aw_markers command"
+  exit 1
+fi
+
+# Player UI physical_status checks
+if ! grep -q "отмечено\|не отмечено" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player UI must mention physical status"
+  exit 1
+fi
+
+if ! grep -q "aw_investigate" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_investigate command"
+  exit 1
+fi
+
+# README checks
+if ! grep -q "/aw_site_debug" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_site_debug"
+  exit 1
+fi
+
+if ! grep -q "/aw_anchor_site" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_anchor_site"
+  exit 1
+fi
+
+if ! grep -q "/aw_investigate" "$ROOT/README.md"; then
+  echo "README.md must mention /aw_investigate"
+  exit 1
+fi
+
 # No forbidden hardcoded paths
 if grep -R "/opt/luanti-aliveworld" "$ROOT" \
   --exclude-dir=.git \

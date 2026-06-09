@@ -210,8 +210,19 @@ function aliveworld.tick()
     if aliveworld.rumors then
       aliveworld.rumors.expire_old(d)
     end
+    if aliveworld.sites and aliveworld.sites.expire_old then
+      aliveworld.sites.expire_old(d)
+    end
     if aliveworld.events and aliveworld.events.tick then
-      aliveworld.events.tick(d, env, old_statuses)
+      local created = aliveworld.events.tick(d, env, old_statuses)
+      if aliveworld.sites and aliveworld.sites.create_event_site and created then
+        for _, ev_id in ipairs(created) do
+          local ev = aliveworld.events.get(ev_id)
+          if ev then
+            aliveworld.sites.create_event_site(ev)
+          end
+        end
+      end
     end
   end
 
@@ -250,8 +261,13 @@ end
 load()
 
 dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
+
+if aliveworld.sites and aliveworld.sites.ensure_initial_settlement_sites then
+  aliveworld.sites.ensure_initial_settlement_sites()
+end
 
 local function tick_loop()
   if not state.paused then
@@ -421,12 +437,16 @@ minetest.register_chatcommand("aw_settlements", {
       return true, "No settlements. Use /aw_settlement_init to create."
     end
     local lines = {}
-    table.insert(lines, string.format("%-20s %-10s %-8s %-5s %-5s %-5s %-6s %-12s",
-      "Name", "Kind", "Pop", "Food", "Wood", "Safe", "Mood", "Status"))
-    table.insert(lines, string.rep("-", 80))
+    table.insert(lines, string.format("%-20s %-10s %-8s %-5s %-5s %-5s %-6s %-12s %s",
+      "Name", "Kind", "Pop", "Food", "Wood", "Safe", "Mood", "Status", "Site"))
+    table.insert(lines, string.rep("-", 95))
     for _, s in ipairs(list) do
-      table.insert(lines, string.format("%-20s %-10s %-8d %-5d %-5d %-5d %-6d %-12s",
-        s.name, s.kind, s.population, s.food, s.wood, s.safety, s.mood, s.status))
+      local has_site = "no"
+      if aliveworld.sites and aliveworld.sites.find_by_settlement then
+        has_site = aliveworld.sites.find_by_settlement(s.id) and "yes" or "no"
+      end
+      table.insert(lines, string.format("%-20s %-10s %-8d %-5d %-5d %-5d %-6d %-12s %s",
+        s.name, s.kind, s.population, s.food, s.wood, s.safety, s.mood, s.status, has_site))
     end
     return true, table.concat(lines, "\n")
   end,
@@ -457,6 +477,15 @@ minetest.register_chatcommand("aw_settlement", {
     table.insert(lines, string.format("Status: %s", s.status))
     table.insert(lines, string.format("Created: day %d", s.created_day))
     table.insert(lines, string.format("Last tick: day %d", s.last_tick_day))
+    if aliveworld.sites and aliveworld.sites.find_by_settlement then
+      local site = aliveworld.sites.find_by_settlement(s.id)
+      if site then
+        table.insert(lines, string.format("Site: %s at (%d,%d,%d) radius=%d",
+          site.id, site.pos.x, site.pos.y, site.pos.z, site.radius))
+      else
+        table.insert(lines, "Site: none")
+      end
+    end
     return true, table.concat(lines, "\n")
   end,
 })
@@ -635,6 +664,14 @@ minetest.register_chatcommand("aw_event_tick", {
       aliveworld.rumors.expire_old(d)
     end
     local created = aliveworld.events.tick(d, env, old_statuses)
+    if aliveworld.sites and aliveworld.sites.create_event_site and created then
+      for _, ev_id in ipairs(created) do
+        local ev = aliveworld.events.get(ev_id)
+        if ev then
+          aliveworld.sites.create_event_site(ev)
+        end
+      end
+    end
 
     return true, string.format("Event generation tick complete. %d new events created.", #created)
   end,
@@ -729,6 +766,301 @@ minetest.register_chatcommand("aw_rumor", {
     table.insert(lines, string.format("Created: day %d", r.created_day))
     table.insert(lines, string.format("Expires: day %d", r.expires_day))
     table.insert(lines, string.format("Text: %s", r.text_en))
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_sites", {
+  params = "",
+  description = "List all active sites",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local list = aliveworld.sites.list()
+    if #list == 0 then
+      return true, "No sites."
+    end
+    local lines = {}
+    table.insert(lines, string.format("%-20s %-12s %-12s %-16s %-12s %-10s %s",
+      "ID", "Type", "Subtype", "Settlement/Event", "Status", "Pos", "Name"))
+    table.insert(lines, string.rep("-", 100))
+    for _, s in ipairs(list) do
+      if s.status == "active" then
+        local ref = s.settlement_id or s.event_id or ""
+        table.insert(lines, string.format("%-20s %-12s %-12s %-16s %-12s (%d,%d,%d) %s",
+          s.id, s.type, s.subtype, ref, s.status, s.pos.x, s.pos.y, s.pos.z, s.name_en))
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_site", {
+  params = "<id>",
+  description = "Show detailed site information",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_site <id>"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local site = aliveworld.sites.get(param)
+    if not site then
+      return false, "Site not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("Site: %s", site.id))
+    table.insert(lines, string.format("Name: %s / %s", site.name, site.name_en))
+    table.insert(lines, string.format("Type: %s (%s)", site.type, site.subtype))
+    if site.settlement_id then
+      table.insert(lines, string.format("Settlement: %s", site.settlement_id))
+    end
+    if site.event_id then
+      table.insert(lines, string.format("Event: %s", site.event_id))
+    end
+    table.insert(lines, string.format("Pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+    table.insert(lines, string.format("Radius: %d", site.radius))
+    table.insert(lines, string.format("Status: %s", site.status))
+    table.insert(lines, string.format("Created: day %d", site.created_day))
+    if site.expires_day then
+      table.insert(lines, string.format("Expires: day %d", site.expires_day))
+    end
+    if site.data and next(site.data) then
+      local data_lines = {}
+      for k, v in pairs(site.data) do
+        table.insert(data_lines, k .. "=" .. tostring(v))
+      end
+      table.insert(lines, string.format("Data: %s", table.concat(data_lines, ", ")))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_sites_init", {
+  params = "",
+  description = "Create initial settlement sites if missing",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local count = aliveworld.sites.ensure_initial_settlement_sites()
+    if count > 0 then
+      return true, "Created " .. count .. " settlement sites."
+    end
+    return true, "Settlement sites already exist."
+  end,
+})
+
+minetest.register_chatcommand("aw_sites_reset", {
+  params = "[confirm]",
+  description = "Delete all sites and recreate initial settlement sites",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param ~= "confirm" then
+      return false, "WARNING: this will delete all AliveWorld sites. Use /aw_sites_reset confirm"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    aliveworld.sites.reset()
+    local count = aliveworld.sites.ensure_initial_settlement_sites()
+    return true, "Sites reset. Created " .. count .. " settlement sites."
+  end,
+})
+
+minetest.register_chatcommand("aw_sites_near", {
+  params = "<x> <y> <z> [limit]",
+  description = "Show nearest active sites from position",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_sites_near <x> <y> <z> [limit]"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local x_str, y_str, z_str, limit_str = param:match("^(%S+)%s+(%S+)%s+(%S+)%s*(%S*)$")
+    if not x_str or not y_str or not z_str then
+      return false, "Usage: /aw_sites_near <x> <y> <z> [limit]"
+    end
+    local x = tonumber(x_str)
+    local y = tonumber(y_str)
+    local z = tonumber(z_str)
+    if not x or not y or not z then
+      return false, "Coordinates must be numbers"
+    end
+    local limit = limit_str and tonumber(limit_str) or 5
+    if not limit or limit < 1 then
+      return false, "Limit must be a positive number"
+    end
+    local from_pos = {x = x, y = y, z = z}
+    local near = aliveworld.sites.nearest(from_pos, limit)
+    if #near == 0 then
+      return true, "No active sites near (" .. x .. "," .. y .. "," .. z .. ")."
+    end
+    local lines = {}
+    table.insert(lines, string.format("Nearest %d active sites from (%d,%d,%d):", #near, x, y, z))
+    table.insert(lines, "")
+    for _, s in ipairs(near) do
+      local dist = aliveworld.sites.distance(from_pos, s.pos)
+      local dir = aliveworld.sites.direction_name_en(from_pos, s.pos)
+      table.insert(lines, string.format("  %-20s %-10s dist=%-6d dir=%-12s (%d,%d,%d)",
+        s.id, s.type, dist, dir, s.pos.x, s.pos.y, s.pos.z))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_site_debug", {
+  params = "<site_id>",
+  description = "Show detailed debug info for a site",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_site_debug <site_id>"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local site = aliveworld.sites.get(param)
+    if not site then
+      return false, "Site not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("ID: %s", site.id))
+    table.insert(lines, string.format("Name: %s / %s", site.name, site.name_en))
+    table.insert(lines, string.format("Type: %s (%s)", site.type, site.subtype))
+    table.insert(lines, string.format("Logical pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+    table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
+    if site.anchor_pos then
+      table.insert(lines, string.format("Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
+    else
+      table.insert(lines, "Anchor pos: none")
+    end
+    table.insert(lines, string.format("Marker ID: %s", site.marker_id or "none"))
+    table.insert(lines, string.format("Discovered: %s", tostring(site.discovered)))
+    table.insert(lines, string.format("Radius: %d", site.radius))
+    table.insert(lines, string.format("Status: %s", site.status))
+    table.insert(lines, string.format("Settlement: %s", site.settlement_id or "none"))
+    table.insert(lines, string.format("Event: %s", site.event_id or "none"))
+    table.insert(lines, "")
+    local players = minetest.get_connected_players()
+    if #players > 0 then
+      table.insert(lines, "Distances from players:")
+      for _, p in ipairs(players) do
+        local pname = p:get_player_name()
+        local ppos = p:get_pos()
+        if ppos then
+          local from = {x = ppos.x, y = ppos.y, z = ppos.z}
+          local dist = aliveworld.sites.distance(from, site.pos)
+          local dir = aliveworld.sites.direction_name_en(from, site.pos)
+          table.insert(lines, string.format("  %s: dist=%d dir=%s", pname, dist, dir))
+        end
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_whereami", {
+  params = "[player_name]",
+  description = "Show current coordinates and nearest sites",
+  privs = {server = true},
+  func = function(_, param)
+    local target = param or ""
+    local players = minetest.get_connected_players()
+    local p = nil
+    if target ~= "" then
+      for _, pl in ipairs(players) do
+        if pl:get_player_name() == target then
+          p = pl
+          break
+        end
+      end
+      if not p then
+        return false, "Player not found or not online: " .. target
+      end
+    elseif #players > 0 then
+      p = players[1]
+    else
+      return false, "No players online."
+    end
+    local ppos = p:get_pos()
+    if not ppos then
+      return false, "Cannot get player position."
+    end
+    local from = {x = ppos.x, y = ppos.y, z = ppos.z}
+    local pname = p:get_player_name()
+    local lines = {}
+    table.insert(lines, string.format("Player: %s", pname))
+    table.insert(lines, string.format("Pos: (%d,%d,%d)", math.floor(from.x), math.floor(from.y), math.floor(from.z)))
+    table.insert(lines, "")
+    if aliveworld.sites then
+      local near = aliveworld.sites.nearest(from, 5)
+      if #near == 0 then
+        table.insert(lines, "No active sites nearby.")
+      else
+        table.insert(lines, "Nearest sites:")
+        for _, s in ipairs(near) do
+          local dist = aliveworld.sites.distance(from, s.pos)
+          local dir = aliveworld.sites.direction_name_en(from, s.pos)
+          local phys = s.physical_status or "abstract"
+          table.insert(lines, string.format("  %-20s dist=%-6d dir=%-12s phys=%-12s (%d,%d,%d)",
+            s.id, dist, dir, phys, s.pos.x, s.pos.y, s.pos.z))
+        end
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_compass", {
+  params = "<player_name> <site_id>",
+  description = "Show direction and distance from player to site",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_compass <player_name> <site_id>"
+    end
+    local pname, site_id = param:match("^(%S+)%s+(%S+)$")
+    if not pname or not site_id then
+      return false, "Usage: /aw_compass <player_name> <site_id>"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local site = aliveworld.sites.get(site_id)
+    if not site then
+      return false, "Site not found: " .. site_id
+    end
+    local player = minetest.get_player_by_name(pname)
+    if not player then
+      return false, "Player not found or not online: " .. pname
+    end
+    local ppos = player:get_pos()
+    if not ppos then
+      return false, "Cannot get player position."
+    end
+    local from = {x = ppos.x, y = ppos.y, z = ppos.z}
+    local dist = aliveworld.sites.distance(from, site.pos)
+    local dir_en = aliveworld.sites.direction_name_en(from, site.pos)
+    local dir_ru = aliveworld.sites.direction_name_ru(from, site.pos)
+    local lines = {}
+    table.insert(lines, string.format("Compass: %s -> %s (%s)", pname, site_id, site.name_en))
+    table.insert(lines, string.format("Distance: %d blocks", dist))
+    table.insert(lines, string.format("Direction: %s (%s)", dir_en, dir_ru))
+    table.insert(lines, string.format("Target pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+    table.insert(lines, string.format("Player pos: (%d,%d,%d)", math.floor(from.x), math.floor(from.y), math.floor(from.z)))
+    table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
+    if site.anchor_pos then
+      local adist = aliveworld.sites.distance(from, site.anchor_pos)
+      table.insert(lines, string.format("Anchor pos: (%d,%d,%d) (dist=%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z, adist))
+    end
     return true, table.concat(lines, "\n")
   end,
 })
