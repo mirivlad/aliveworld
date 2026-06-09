@@ -31,6 +31,11 @@ docker compose up -d
 docker logs -f luanti-aliveworld
 ```
 
+Если используется прокси:
+```bash
+./scripts/install-content.py --proxy http://127.0.0.1:12334
+```
+
 ---
 
 ## Проверка в игре

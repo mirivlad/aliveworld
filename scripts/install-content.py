@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
 import shutil
+import sys
 import tempfile
 import urllib.request
 import zipfile
@@ -28,6 +30,17 @@ MARKERS = {
     "texturepacks": ["texture_pack.conf"],
 }
 
+def setup_proxy(proxy_url: str | None):
+    if proxy_url is None:
+        proxy_url = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+    if proxy_url:
+        proxy_support = urllib.request.ProxyHandler({
+            "http": proxy_url,
+            "https": proxy_url,
+        })
+        opener = urllib.request.build_opener(proxy_support)
+        urllib.request.install_opener(opener)
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -38,7 +51,7 @@ def sha256_file(path: Path) -> str:
 def download(author: str, name: str, tmpdir: Path) -> Path:
     url = f"https://content.luanti.org/packages/{author}/{name}/download/"
     out = tmpdir / f"{author}__{name}.zip"
-    print(f"Downloading {author}/{name}")
+    print(f"Downloading {author}/{name}", flush=True)
     urllib.request.urlretrieve(url, out)
     return out
 
@@ -98,6 +111,12 @@ def install_package(section: str, item: dict, lock_items: list[dict]):
         print(f"Installed {author}/{name} -> {dest}")
 
 def main():
+    parser = argparse.ArgumentParser(description="Install Luanti content from ContentDB")
+    parser.add_argument("--proxy", help="HTTP/HTTPS proxy (e.g. http://127.0.0.1:12334)")
+    args = parser.parse_args()
+
+    setup_proxy(args.proxy)
+
     with CONFIG.open("r", encoding="utf-8") as f:
         manifest = json.load(f)
 

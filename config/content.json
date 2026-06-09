@@ -11,6 +11,11 @@
       "author": "rudzik8",
       "name": "mcl_decor",
       "target": "mcl_decor"
+    },
+    {
+      "author": "rudzik8",
+      "name": "mcl_cozy",
+      "target": "mcl_cozy"
     }
   ],
   "dev_mods": [
