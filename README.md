@@ -93,6 +93,13 @@ docker attach luanti-aliveworld
 /aw_event_reset        # delete all world events and rumors
 /aw_rumors             # list all active rumors
 /aw_rumor <id>         # detailed info about a rumor
+
+### Player commands (in-game, aliveworld_player, requires `interact`)
+
+/aw_news               # show active rumors (formspec)
+/aw_world              # show world state overview (formspec)
+/aw_chronicle_read     # read recent chronicle entries (formspec)
+/aw_help               # command help
 ```
 
 > **ASCII output**: Server-console commands intentionally use ASCII/English because the ncurses terminal inside Docker may render Cyrillic incorrectly. Russian text (`label_ru`) is preserved in bridge profiles and chronicle event `data` for the future in-game UI layer.
@@ -172,6 +179,7 @@ luanti-aliveworld/
       settlements.lua       # модель и симуляция поселений
     aliveworld_bridge_mcl/  # мост к Mineclonia
     aliveworld_admin/       # админ-инструменты (/aw_status, /aw_bridge)
+    aliveworld_player/      # player UI (rumors, world state, chronicle, Rumor Board node)
 
   scripts/
     build-image.sh          # сборка Docker-образа

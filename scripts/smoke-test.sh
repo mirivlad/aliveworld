@@ -203,6 +203,32 @@ if ! grep -q "aw_event_reset" "$ROOT/local_mods/aliveworld_core/init.lua"; then
   exit 1
 fi
 
+# AliveWorld Player checks
+if ! [ -f "$ROOT/local_mods/aliveworld_player/mod.conf" ]; then
+  echo "aliveworld_player must have mod.conf"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/init.lua" ]; then
+  echo "aliveworld_player must have init.lua"
+  exit 1
+fi
+
+if ! grep -q "aw_news" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_news command"
+  exit 1
+fi
+
+if ! grep -q "rumor_board" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register rumor_board node"
+  exit 1
+fi
+
+if ! grep -q "load_mod_aliveworld_player" "$ROOT/data/worlds/aliveworld/world.mt"; then
+  echo "world.mt must have load_mod_aliveworld_player = true"
+  exit 1
+fi
+
 # No forbidden hardcoded paths
 if grep -R "/opt/luanti-aliveworld" "$ROOT" \
   --exclude-dir=.git \
