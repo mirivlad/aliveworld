@@ -59,6 +59,10 @@ RUN mkdir build && cd build && \
 
 FROM debian:bookworm-slim
 
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV TERM=xterm-256color
+
 RUN apt-get update -qq && apt-get install -y -qq \
     ca-certificates \
     libcurl4 \
@@ -66,8 +70,11 @@ RUN apt-get update -qq && apt-get install -y -qq \
     libjsoncpp25 \
     libncursesw6 \
     libsqlite3-0 \
+    locales \
     zlib1g \
     libzstd1 \
+  && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen \
+  && locale-gen \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/bin/luantiserver /usr/bin/luantiserver

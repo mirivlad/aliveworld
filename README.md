@@ -65,10 +65,24 @@ docker attach luanti-aliveworld
 /status
 /grant mirivlad all
 /aw_day
+/aw_time
 /aw_tick
-/aw_chronicle
-/aw_status
+/aw_tick_reset          # reset calendar to day 1
+/aw_chronicle           # latest events
+/aw_chronicle raw       # full JSON dump
+/aw_history             # alias for /aw_chronicle
+/aw_status              # date + season + food/wood/danger
+/aw_bridge summary      # full environment profile
+/aw_bridge foods
+/aw_bridge woods
+/aw_bridge dangers
+/aw_bridge seasons
+/aw_pause
+/aw_resume
+/aw_config
 ```
+
+> **ASCII output**: Server-console commands intentionally use ASCII/English because the ncurses terminal inside Docker may render Cyrillic incorrectly. Russian text (`label_ru`) is preserved in bridge profiles and chronicle event `data` for the future in-game UI layer.
 
 Выход из attach **без остановки сервера**: `Ctrl+P` затем `Ctrl+Q`.
 
@@ -113,6 +127,8 @@ INCLUDE_DEV_MODS=1 ./scripts/install-content.py
 - `aliveworld_core` не зависит напрямую от Mineclonia или других игр.
 - Все обращения к item/node/mob именам живут в `aliveworld_bridge_mcl`.
 - `aliveworld_core` — единственный источник истины для состояния живого мира.
+- `aliveworld.bridge` — абстрактный слой: `get_environment_profile(world_time)`, `get_season(world_time)`, `get_food_profile(world_time)`, `get_wood_profile(world_time)`, `get_danger_profile(world_time)`.
+- Каждый новый день core вызывает bridge и сохраняет environment profile как `environment_tick` в хронике.
 - Чужие моды (`mcl_*`) нельзя редактировать — только bridge-моды.
 - Новые фичи живого мира — только в `local_mods/aliveworld_*`.
 
@@ -140,7 +156,7 @@ luanti-aliveworld/
   local_mods/               # наши моды (под git)
     aliveworld_core/        # ядро симуляции
     aliveworld_bridge_mcl/  # мост к Mineclonia
-    aliveworld_admin/       # админ-инструменты
+    aliveworld_admin/       # админ-инструменты (/aw_status, /aw_bridge)
 
   scripts/
     build-image.sh          # сборка Docker-образа
