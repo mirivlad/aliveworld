@@ -1,0 +1,35 @@
+{
+  "games": [
+    {
+      "author": "ryvnf",
+      "name": "mineclonia",
+      "target": "mineclonia"
+    }
+  ],
+  "mods": [
+    {
+      "author": "rudzik8",
+      "name": "mcl_decor",
+      "target": "mcl_decor"
+    }
+  ],
+  "dev_mods": [
+    {
+      "author": "sfan5",
+      "name": "worldedit",
+      "target": "worldedit"
+    },
+    {
+      "author": "TenPlus1",
+      "name": "protector",
+      "target": "protector"
+    }
+  ],
+  "texturepacks": [
+    {
+      "author": "MysticTempest",
+      "name": "refi_textures",
+      "target": "refi_textures"
+    }
+  ]
+}

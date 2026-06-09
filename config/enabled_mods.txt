@@ -1,0 +1,6 @@
+aliveworld_core
+aliveworld_bridge_mcl
+aliveworld_admin
+mcl_decor
+# worldedit
+# protector
