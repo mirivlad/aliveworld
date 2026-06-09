@@ -52,4 +52,14 @@ minetest.register_chatcommand("aw_tick", {
     end
 })
 
+local function do_tick()
+    local day = get_day() + 1
+    storage:set_int("world_day", day)
+    add_chronicle("День " .. day .. ": мир живёт и развивается.")
+    minetest.log("action", "[aliveworld_core] auto-tick: день " .. day)
+    minetest.after(120, do_tick)
+end
+
+minetest.after(120, do_tick)
+
 minetest.log("action", "[aliveworld_core] loaded")

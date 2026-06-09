@@ -1,14 +1,24 @@
 services:
   luanti:
-    image: lscr.io/linuxserver/luanti:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: luanti-aliveworld
+    stdin_open: true
+    tty: true
     environment:
-      - PUID=1000
-      - PGID=1000
       - TZ=Europe/Amsterdam
-      - CLI_ARGS=--worldname aliveworld --gameid mineclonia --port 30000
+      - LUANTI_USER_PATH=/config/.minetest
     volumes:
       - ./data:/config/.minetest
+      - ./config/luanti.conf:/config/.minetest/minetest.conf
     ports:
       - "30000:30000/udp"
     restart: unless-stopped
+    command: >
+      luantiserver
+      --terminal
+      --config /config/.minetest/minetest.conf
+      --world /config/.minetest/worlds/aliveworld
+      --gameid mineclonia
+      --port 30000

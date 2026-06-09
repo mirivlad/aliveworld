@@ -1,3 +1,6 @@
+aliveworld = rawget(_G, "aliveworld") or {}
+_G.aliveworld = aliveworld
+
 minetest.register_chatcommand("aw_status", {
     description = "AliveWorld status",
     privs = {server = true},

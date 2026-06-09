@@ -1,159 +1,157 @@
 # Luanti AliveWorld
 
-Воспроизводимая серверная сборка Luanti (бывший Minetest) с Mineclonia.
+Воспроизводимая серверная сборка [Luanti](https://www.luanti.org/) (бывший Minetest) с [Mineclonia](https://content.luanti.org/packages/ryvnf/mineclonia/).
 
-Все пути — относительные от корня репозитория. `/opt` не используется.
+Сервер собирается из исходников в собственный Docker-образ с ncurses и `--terminal` для интерактивной консоли.
 
 ---
 
-## Первый запуск
+## Требования
+
+- Docker + Docker Compose (плагин)
+- Python 3 для `scripts/install-content.py`
+- Порты: `30000/udp`
+
+## Сборка образа
 
 ```bash
-mkdir -p ~/git
-cd ~/git
-git init luanti-aliveworld
-cd luanti-aliveworld
+./scripts/build-image.sh
+```
 
-mkdir -p config data/games data/mods data/texturepacks data/worlds/aliveworld local_mods scripts locks backups
+Или напрямую:
+```bash
+docker compose build
+```
 
-cp config/luanti.conf data/minetest.conf
+## Быстрый старт
 
-chmod +x scripts/install-content.py
-chmod +x scripts/sync-local-mods.sh
-chmod +x scripts/backup-world.sh
-chmod +x scripts/smoke-test.sh
-
+```bash
+# 1. Установить контент (Mineclonia, моды)
 ./scripts/install-content.py
-./scripts/sync-local-mods.sh
-./scripts/smoke-test.sh
 
+# 2. Синхронизировать наши моды
+./scripts/sync-local-mods.sh
+
+# 3. Собрать образ и запустить
+./scripts/build-image.sh
 docker compose up -d
+
+# 4. Проверить логи
 docker logs -f luanti-aliveworld
 ```
 
-Если используется прокси:
+Если через прокси:
 ```bash
 ./scripts/install-content.py --proxy http://127.0.0.1:12334
 ```
 
----
+## Серверная консоль
 
-## Проверка в игре
+Сервер запускается с флагом `--terminal` — в контейнере работает интерактивная консоль Luanti.
 
-Подключиться к серверу:
-- address: IP или домен сервера
-- port: 30000
-- protocol: UDP port must be forwarded if server is public
-
-В игре выполнить:
+Подключиться:
+```bash
+./scripts/console.sh
 ```
-/aw_status
+
+Или напрямую:
+```bash
+docker attach luanti-aliveworld
+```
+
+Команды вводятся прямо в консоль:
+```
+/help
+/status
+/grant mirivlad all
 /aw_day
 /aw_tick
 /aw_chronicle
+/aw_status
 ```
 
----
+Выход из attach **без остановки сервера**: `Ctrl+P` затем `Ctrl+Q`.
 
-## Обновление контента
+**Не нажимайте Ctrl+C** в attach — это остановит сервер. Если сервер остановился, запустите снова:
+```bash
+docker compose start
+```
 
-1. Сделать backup:
-   ```bash
-   ./scripts/backup-world.sh
-   ```
+Просмотр логов без входа в консоль:
+```bash
+docker logs luanti-aliveworld
+```
 
-2. Остановить сервер:
-   ```bash
-   docker compose down
-   ```
+## Обновление наших модов
 
-3. Обновить контент в тестовой копии или отдельной ветке:
-   ```bash
-   ./scripts/install-content.py
-   ```
+```bash
+# Отредактировать файлы в local_mods/aliveworld_*/
+# Затем синхронизировать и перезапустить:
+./scripts/sync-local-mods.sh
+docker compose restart luanti
+```
 
-4. Синхронизировать наши моды:
-   ```bash
-   ./scripts/sync-local-mods.sh
-   ```
+## Полное обновление контента
 
-5. Проверить:
-   ```bash
-   ./scripts/smoke-test.sh
-   ```
+```bash
+./scripts/backup-world.sh
+docker compose down
+./scripts/install-content.py
+./scripts/sync-local-mods.sh
+./scripts/smoke-test.sh
+./scripts/build-image.sh
+docker compose up -d
+```
 
-6. Запустить:
-   ```bash
-   docker compose up -d
-   ```
-
-7. Проверить логи:
-   ```bash
-   docker logs -f luanti-aliveworld
-   ```
-
----
-
-## Установка dev-модов
-
+Dev-моды (worldedit, protector):
 ```bash
 INCLUDE_DEV_MODS=1 ./scripts/install-content.py
 ```
 
-Устанавливает worldedit, protector и другие dev/admin моды в `data/mods/`.
-
----
-
 ## Правила архитектуры
 
-- `aliveworld_core` не зависит напрямую от Mineclonia, VoxeLibre или Minetest Game.
-- Все обращения к конкретным item/node/mob именам живут в `aliveworld_bridge_mcl` или других bridge-модах.
-- `aliveworld_core` хранит только абстрактное состояние мира: календарь, хронику, поселения, фракции, события.
-- NPC, квесты, биомы, декорации и внешние моды не являются источником истины для симуляции.
-- Источник истины — `aliveworld_core`.
-- Чужие моды можно заменить, отключить или обновить без потери состояния живого мира.
-- Нельзя редактировать файлы Mineclonia, mcl_decor, worldedit, protector или любых других внешних модов.
-- Если нужна совместимость с внешним модом — делать отдельный adapter/bridge-мод.
-- Все новые фичи живого мира добавляются в `local_mods/aliveworld_*`.
-- Production-сервер нельзя автообновлять без backup и проверки в тестовом мире.
-- Не использовать абсолютные пути. Весь проект должен быть переносим как git-репозиторий.
-
----
+- `aliveworld_core` не зависит напрямую от Mineclonia или других игр.
+- Все обращения к item/node/mob именам живут в `aliveworld_bridge_mcl`.
+- `aliveworld_core` — единственный источник истины для состояния живого мира.
+- Чужие моды (`mcl_*`) нельзя редактировать — только bridge-моды.
+- Новые фичи живого мира — только в `local_mods/aliveworld_*`.
 
 ## Структура проекта
 
 ```
 luanti-aliveworld/
-  docker-compose.yml
+  Dockerfile               # сборка Luanti с ncurses из исходников
+  docker-compose.yml       # сервис
   README.md
   .gitignore
 
   config/
-    luanti.conf          # конфиг сервера (копируется в data/minetest.conf)
-    content.json         # манифест скачиваемого контента
-    enabled_mods.txt     # список включённых модов (справочно)
+    luanti.conf             # конфиг сервера
+    content.json            # манифест скачиваемого контента
 
-  data/
-    games/               # установленные игры (mineclonia)
-    mods/                # установленные моды (копия local_mods + внешние)
-    texturepacks/        # установленные текстурпаки
-    worlds/              # миры
-      aliveworld/
-        world.mt         # мета мира
+  data/                     # runtime-данные (в .gitignore)
+    games/                  # установленные игры
+    mods/                   # установленные моды
+    worlds/aliveworld/      # мир
+    mod_data/               # runtime-данные модов
+    minetest.conf           # копия config/luanti.conf
+    debug.txt               # лог
 
-  local_mods/
-    aliveworld_core/     # ядро симуляции
-    aliveworld_bridge_mcl/ # мост к Mineclonia
-    aliveworld_admin/    # админ-инструменты
+  local_mods/               # наши моды (под git)
+    aliveworld_core/        # ядро симуляции
+    aliveworld_bridge_mcl/  # мост к Mineclonia
+    aliveworld_admin/       # админ-инструменты
 
   scripts/
-    install-content.py   # загрузчик контента с ContentDB
-    sync-local-mods.sh   # синхронизация local_mods -> data/mods
-    backup-world.sh      # бэкап мира
-    smoke-test.sh        # проверка структуры
+    build-image.sh          # сборка Docker-образа
+    console.sh              # подключение к консоли сервера
+    install-content.py      # загрузчик контента
+    sync-local-mods.sh      # local_mods -> data/mods
+    backup-world.sh         # бэкап мира
+    smoke-test.sh           # проверка структуры
 
   locks/
-    content.lock.json    # фиксация скачанного контента (под git)
+    content.lock.json       # фиксация версий контента
 
-  backups/               # архивы бэкапов (в .gitignore)
+  backups/                  # бэкапы (в .gitignore)
 ```
