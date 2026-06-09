@@ -157,6 +157,52 @@ if ! grep -q "ASCII output" "$ROOT/README.md"; then
   exit 1
 fi
 
+# World events checks
+if ! grep -q "world_events.lua" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must dofile world_events.lua"
+  exit 1
+fi
+
+if ! grep -q "rumors.lua" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must dofile rumors.lua"
+  exit 1
+fi
+
+if ! grep -q "aliveworld.events" "$ROOT/local_mods/aliveworld_core/world_events.lua"; then
+  echo "world_events.lua must set up aliveworld.events"
+  exit 1
+fi
+
+if ! grep -q "generate_from_settlement" "$ROOT/local_mods/aliveworld_core/world_events.lua"; then
+  echo "world_events.lua must have generate_from_settlement"
+  exit 1
+fi
+
+if ! grep -q "aliveworld.rumors" "$ROOT/local_mods/aliveworld_core/rumors.lua"; then
+  echo "rumors.lua must set up aliveworld.rumors"
+  exit 1
+fi
+
+if ! grep -q "create_from_event" "$ROOT/local_mods/aliveworld_core/rumors.lua"; then
+  echo "rumors.lua must have create_from_event"
+  exit 1
+fi
+
+if ! grep -q "aw_events" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_events command"
+  exit 1
+fi
+
+if ! grep -q "aw_rumors" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_rumors command"
+  exit 1
+fi
+
+if ! grep -q "aw_event_reset" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_event_reset command"
+  exit 1
+fi
+
 # No forbidden hardcoded paths
 if grep -R "/opt/luanti-aliveworld" "$ROOT" \
   --exclude-dir=.git \

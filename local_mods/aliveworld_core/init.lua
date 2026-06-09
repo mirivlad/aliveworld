@@ -186,14 +186,32 @@ function aliveworld.tick()
   add_event("tick", string.format("Day %d: world lives and develops.", state.total_days))
 
   if aliveworld.bridge and aliveworld.bridge.get_environment_profile then
-    local env = aliveworld.bridge.get_environment_profile(aliveworld.get_date())
+    local d = aliveworld.get_date()
+    local env = aliveworld.bridge.get_environment_profile(d)
     add_event("environment_tick",
       string.format("Day %d: season=%s food=%s wood=%s danger=%s",
         state.total_days, env.season.key, env.food.key, env.wood.key, env.danger.key),
       env)
 
+    local old_statuses = {}
+    if aliveworld.settlements and aliveworld.settlements.list then
+      for _, s in ipairs(aliveworld.settlements.list()) do
+        old_statuses[s.id] = s.status
+      end
+    end
+
     if aliveworld.settlements and aliveworld.settlements.tick_all then
-      aliveworld.settlements.tick_all(aliveworld.get_date(), env)
+      aliveworld.settlements.tick_all(d, env)
+    end
+
+    if aliveworld.events then
+      aliveworld.events.expire_old(d)
+    end
+    if aliveworld.rumors then
+      aliveworld.rumors.expire_old(d)
+    end
+    if aliveworld.events and aliveworld.events.tick then
+      aliveworld.events.tick(d, env, old_statuses)
     end
   end
 
@@ -232,6 +250,8 @@ end
 load()
 
 dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
 
 local function tick_loop()
   if not state.paused then
@@ -476,6 +496,240 @@ minetest.register_chatcommand("aw_settlement_reset", {
     end
     local ok, msg = aliveworld.settlements.reset_all()
     return ok, msg
+  end,
+})
+
+minetest.register_chatcommand("aw_settlement_set", {
+  params = "<id> <field> <value>",
+  description = "Set a settlement field for testing (food, wood, safety, mood, prosperity, population)",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_settlement_set <id> <field> <value>"
+    end
+    local id, field, value_str = param:match("^(%S+)%s+(%S+)%s+(%S+)$")
+    if not id or not field or not value_str then
+      return false, "Usage: /aw_settlement_set <id> <field> <value>"
+    end
+    local s = aliveworld.settlements.get(id)
+    if not s then
+      return false, "Settlement not found: " .. id
+    end
+    local allowed = {population = true, food = true, wood = true, safety = true, mood = true, prosperity = true}
+    if not allowed[field] then
+      return false, "Invalid field. Allowed: population, food, wood, safety, mood, prosperity"
+    end
+    local value = tonumber(value_str)
+    if not value then
+      return false, "Value must be a number"
+    end
+    if field == "population" then
+      s.population = math.max(0, math.floor(value))
+    elseif field == "food" then
+      s.food = math.max(0, math.min(100, value))
+    elseif field == "wood" then
+      s.wood = math.max(0, math.min(100, value))
+    elseif field == "safety" then
+      s.safety = math.max(0, math.min(100, value))
+    elseif field == "mood" then
+      s.mood = math.max(-100, math.min(100, value))
+    elseif field == "prosperity" then
+      s.prosperity = math.max(0, math.min(100, value))
+    end
+    aliveworld.settlements.save(s)
+    aliveworld.add_event("dev_settlement_modified",
+      string.format("Dev: %s=%s for settlement %s", field, value_str, id),
+      {settlement_id = id, field = field, value = value}
+    )
+    return true, string.format("Settlement %s: %s set to %s", id, field, value_str)
+  end,
+})
+
+minetest.register_chatcommand("aw_events", {
+  params = "",
+  description = "List all active world events",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.events then
+      return false, "Events module not loaded"
+    end
+    local list = aliveworld.events.list()
+    if #list == 0 then
+      return true, "No world events."
+    end
+    local lines = {}
+    table.insert(lines, string.format("%-14s %-18s %-10s %-16s %-10s %-8s %s",
+      "ID", "Type", "Severity", "Settlement", "Status", "Day", "Text"))
+    table.insert(lines, string.rep("-", 100))
+    for _, ev in ipairs(list) do
+      if ev.status == "active" then
+        table.insert(lines, string.format("%-14s %-18s %-10s %-16s %-10s %-8d %s",
+          ev.id, ev.type, ev.severity, ev.settlement_id, ev.status, ev.created_day, ev.text_en))
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_event", {
+  params = "<id>",
+  description = "Show detailed information about a world event",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_event <id>"
+    end
+    if not aliveworld.events then
+      return false, "Events module not loaded"
+    end
+    local ev = aliveworld.events.get(param)
+    if not ev then
+      return false, "Event not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("Event: %s", ev.id))
+    table.insert(lines, string.format("Type: %s (%s)", ev.type, ev.severity))
+    table.insert(lines, string.format("Settlement: %s (%s)", ev.settlement_id, ev.faction_id))
+    table.insert(lines, string.format("Status: %s", ev.status))
+    table.insert(lines, string.format("Created: day %d", ev.created_day))
+    table.insert(lines, string.format("Expires: day %d", ev.expires_day))
+    if ev.resolved_day then
+      table.insert(lines, string.format("Resolved: day %d", ev.resolved_day))
+    end
+    table.insert(lines, string.format("Source: %s", ev.source))
+    table.insert(lines, string.format("Text: %s", ev.text_en))
+    if ev.data and next(ev.data) then
+      local data_lines = {}
+      for k, v in pairs(ev.data) do
+        table.insert(data_lines, k .. "=" .. tostring(v))
+      end
+      table.insert(lines, string.format("Data: %s", table.concat(data_lines, ", ")))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_event_tick", {
+  params = "",
+  description = "Force world event generation tick",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.events then
+      return false, "Events module not loaded"
+    end
+    if not aliveworld.bridge or not aliveworld.bridge.get_environment_profile then
+      return false, "No bridge module loaded"
+    end
+    local d = aliveworld.get_date()
+    local env = aliveworld.bridge.get_environment_profile(d)
+
+    local old_statuses = {}
+    if aliveworld.settlements and aliveworld.settlements.list then
+      for _, s in ipairs(aliveworld.settlements.list()) do
+        old_statuses[s.id] = s.status
+      end
+    end
+
+    aliveworld.events.expire_old(d)
+    if aliveworld.rumors then
+      aliveworld.rumors.expire_old(d)
+    end
+    local created = aliveworld.events.tick(d, env, old_statuses)
+
+    return true, string.format("Event generation tick complete. %d new events created.", #created)
+  end,
+})
+
+minetest.register_chatcommand("aw_event_resolve", {
+  params = "<id> [reason]",
+  description = "Resolve a world event",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_event_resolve <id> [reason]"
+    end
+    local id, reason = param:match("^(%S+)%s+(.+)$")
+    if not id then
+      id = param
+      reason = nil
+    end
+    if not aliveworld.events then
+      return false, "Events module not loaded"
+    end
+    local ok, msg = aliveworld.events.resolve(id, reason)
+    return ok, msg
+  end,
+})
+
+minetest.register_chatcommand("aw_event_reset", {
+  params = "[confirm]",
+  description = "Delete all world events and rumors",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param ~= "confirm" then
+      return false, "WARNING: this will delete all world events and rumors. Use /aw_event_reset confirm"
+    end
+    if aliveworld.events and aliveworld.events.reset then
+      aliveworld.events.reset()
+    end
+    if aliveworld.rumors and aliveworld.rumors.reset then
+      aliveworld.rumors.reset()
+    end
+    aliveworld.add_event("dev_event_reset", "All world events and rumors have been reset by administrator.")
+    return true, "All world events and rumors deleted."
+  end,
+})
+
+minetest.register_chatcommand("aw_rumors", {
+  params = "",
+  description = "List all active rumors",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.rumors then
+      return false, "Rumors module not loaded"
+    end
+    local list = aliveworld.rumors.list()
+    if #list == 0 then
+      return true, "No rumors."
+    end
+    local lines = {}
+    table.insert(lines, string.format("%-14s %-14s %-16s %-10s %-8s %s",
+      "ID", "Event", "Settlement", "Status", "Day", "Text"))
+    table.insert(lines, string.rep("-", 90))
+    for _, r in ipairs(list) do
+      if r.status == "active" then
+        table.insert(lines, string.format("%-14s %-14s %-16s %-10s %-8d %s",
+          r.id, r.event_id, r.settlement_id, r.status, r.created_day, r.text_en))
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_rumor", {
+  params = "<id>",
+  description = "Show detailed information about a rumor",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_rumor <id>"
+    end
+    if not aliveworld.rumors then
+      return false, "Rumors module not loaded"
+    end
+    local r = aliveworld.rumors.get(param)
+    if not r then
+      return false, "Rumor not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("Rumor: %s", r.id))
+    table.insert(lines, string.format("Event: %s", r.event_id))
+    table.insert(lines, string.format("Settlement: %s", r.settlement_id))
+    table.insert(lines, string.format("Status: %s", r.status))
+    table.insert(lines, string.format("Created: day %d", r.created_day))
+    table.insert(lines, string.format("Expires: day %d", r.expires_day))
+    table.insert(lines, string.format("Text: %s", r.text_en))
+    return true, table.concat(lines, "\n")
   end,
 })
 

@@ -85,6 +85,14 @@ docker attach luanti-aliveworld
 /aw_settlement_init     # create initial settlements
 /aw_settlement_tick     # force settlement simulation tick
 /aw_settlement_reset    # delete and recreate settlements
+/aw_settlement_set     # set a settlement field for testing (server privs)
+/aw_events             # list all active world events
+/aw_event <id>         # detailed info about a world event
+/aw_event_tick         # force world event generation tick
+/aw_event_resolve <id> # resolve a world event
+/aw_event_reset        # delete all world events and rumors
+/aw_rumors             # list all active rumors
+/aw_rumor <id>         # detailed info about a rumor
 ```
 
 > **ASCII output**: Server-console commands intentionally use ASCII/English because the ncurses terminal inside Docker may render Cyrillic incorrectly. Russian text (`label_ru`) is preserved in bridge profiles and chronicle event `data` for the future in-game UI layer.
