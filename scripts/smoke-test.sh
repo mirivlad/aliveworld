@@ -224,6 +224,33 @@ if ! grep -q "rumor_board" "$ROOT/local_mods/aliveworld_player/init.lua"; then
   exit 1
 fi
 
+if ! grep -q "signlike" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "rumor_board must use drawtype = signlike"
+  exit 1
+fi
+
+if ! grep -q "wallmounted" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "rumor_board must use wallmounted paramtype2"
+  exit 1
+fi
+
+if ! grep -q "on_rightclick" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "rumor_board must preserve right-click handler"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_rumor_board_front.png" ]; then
+  echo "rumor_board must have front texture"
+  exit 1
+fi
+
+
+
+if ! grep -q "Новости мира\|Состояние мира\|Летопись\|Активные слухи" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player UI must use Russian"
+  exit 1
+fi
+
 if ! grep -q "load_mod_aliveworld_player" "$ROOT/data/worlds/aliveworld/world.mt"; then
   echo "world.mt must have load_mod_aliveworld_player = true"
   exit 1

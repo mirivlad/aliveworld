@@ -56,8 +56,8 @@ function aliveworld.rumors.create_from_event(event)
     status = "active",
     created_day = event.created_day,
     expires_day = (event.expires_day or event.created_day) + 3,
-    text_en = "Travelers say: " .. event.text_en,
-    text_ru = "Путники говорят: " .. event.text_ru,
+    text_en = event.text_en,
+    text_ru = event.text_ru,
   }
   rumors[id] = r
   storage:set_string(RUMORS_KEY, minetest.write_json(rumors))

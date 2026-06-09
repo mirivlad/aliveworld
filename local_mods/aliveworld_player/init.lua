@@ -38,7 +38,7 @@ function aliveworld_player.format_date(d)
     if aliveworld and aliveworld.get_date then
       d = aliveworld.get_date()
     else
-      return "Unknown date"
+      return "Неизвестная дата"
     end
   end
   local season = ""
@@ -46,8 +46,7 @@ function aliveworld_player.format_date(d)
     local env = aliveworld.bridge.get_environment_profile(d)
     season = string.format(" — %s", aliveworld_player.get_display_text(env.season))
   end
-  return string.format("Year %d, Month %d, Day %d (day %d)%s",
-    d.year, d.month, d.day, d.total_days, season)
+  return string.format("Год %d, месяц %d, день %d%s", d.year, d.month, d.day, season)
 end
 
 -- Chronicle filtering (skip daily noise)
@@ -71,7 +70,7 @@ local function show_formspec(player_name, formname, title, text)
     "size[8,10]",
     "label[0.2,0.2;", minetest.formspec_escape(title), "]",
     "textarea[0.2,0.8;7.6,8.2;;;", escaped, "]",
-    "button_exit[6.5,9;1.5,1;close;Close]",
+    "button_exit[6.5,9;1.5,1;close;Закрыть]",
   })
   minetest.show_formspec(player_name, formname, formspec)
 end
@@ -81,7 +80,7 @@ end
 function aliveworld_player.show_news(player_name)
   local lines = {}
 
-  table.insert(lines, "=== AliveWorld News ===")
+  table.insert(lines, "=== Новости мира ===")
   table.insert(lines, "")
 
   if aliveworld and aliveworld.get_date then
@@ -90,9 +89,9 @@ function aliveworld_player.show_news(player_name)
   end
 
   if has_rumors() then
-    local rumors = aliveworld.rumors.list()
+    local list = aliveworld.rumors.list()
     local active = {}
-    for _, r in ipairs(rumors) do
+    for _, r in ipairs(list) do
       if r.status == "active" then
         table.insert(active, r)
       end
@@ -101,17 +100,17 @@ function aliveworld_player.show_news(player_name)
     if #active == 0 then
       table.insert(lines, "Пока мир молчит. Слухов нет.")
     else
-      table.insert(lines, string.format("=== Active Rumors (%d) ===", #active))
+      table.insert(lines, string.format("=== Активные слухи (%d) ===", #active))
       table.insert(lines, "")
       for _, r in ipairs(active) do
         table.insert(lines, string.format("• %s", aliveworld_player.get_display_text(r)))
-        table.insert(lines, string.format("  [%s] — expires day %d", r.settlement_id, r.expires_day))
+        table.insert(lines, string.format("  Истекает на день %d", r.expires_day))
         table.insert(lines, "")
       end
     end
   end
 
-  show_formspec(player_name, "aliveworld_player:news", "AliveWorld News", table.concat(lines, "\n"))
+  show_formspec(player_name, "aliveworld_player:news", "Новости мира", table.concat(lines, "\n"))
 end
 
 -- show_world: world state overview
@@ -119,7 +118,7 @@ end
 function aliveworld_player.show_world(player_name)
   local lines = {}
 
-  table.insert(lines, "=== AliveWorld State ===")
+  table.insert(lines, "=== Состояние мира ===")
   table.insert(lines, "")
 
   if aliveworld and aliveworld.get_date then
@@ -130,14 +129,14 @@ function aliveworld_player.show_world(player_name)
   local settlers_count = 0
   if has_settlements() then
     local list = aliveworld.settlements.list()
-    table.insert(lines, string.format("Settlements: %d", #list))
+    table.insert(lines, string.format("Поселения: %d", #list))
   end
 
   local events_count = 0
   if has_events() then
     events_count = aliveworld.events.active_count()
   end
-  table.insert(lines, string.format("Active events: %d", events_count))
+  table.insert(lines, string.format("Активные события: %d", events_count))
 
   local rumors_count = 0
   if has_rumors() then
@@ -147,21 +146,21 @@ function aliveworld_player.show_world(player_name)
       end
     end
   end
-  table.insert(lines, string.format("Active rumors: %d", rumors_count))
+  table.insert(lines, string.format("Активные слухи: %d", rumors_count))
   table.insert(lines, "")
 
   if has_bridge() then
     local d = aliveworld.get_date()
     local env = aliveworld.bridge.get_environment_profile(d)
-    table.insert(lines, "=== Environment ===")
-    table.insert(lines, string.format("Season: %s", aliveworld_player.get_display_text(env.season)))
-    table.insert(lines, string.format("Food: %s", aliveworld_player.get_display_text(env.food)))
-    table.insert(lines, string.format("Wood: %s", aliveworld_player.get_display_text(env.wood)))
-    table.insert(lines, string.format("Danger: %s", aliveworld_player.get_display_text(env.danger)))
+    table.insert(lines, "=== Среда ===")
+    table.insert(lines, string.format("Сезон: %s", aliveworld_player.get_display_text(env.season)))
+    table.insert(lines, string.format("Еда: %s", aliveworld_player.get_display_text(env.food)))
+    table.insert(lines, string.format("Дерево: %s", aliveworld_player.get_display_text(env.wood)))
+    table.insert(lines, string.format("Опасность: %s", aliveworld_player.get_display_text(env.danger)))
     table.insert(lines, "")
   end
 
-  table.insert(lines, "=== Latest Chronicle ===")
+  table.insert(lines, "=== Последние записи летописи ===")
   if aliveworld and aliveworld.get_events then
     local chronicle = aliveworld.get_events(10)
     local shown = 0
@@ -169,13 +168,18 @@ function aliveworld_player.show_world(player_name)
       if shown >= 3 then break end
       local ev = chronicle[i]
       if is_meaningful_event(ev) then
-        table.insert(lines, string.format("[day %d] %s", ev.total_day or ev.day, ev.message))
+        local msg = ev.message or ""
+        if ev.text_ru and ev.text_ru ~= "" then
+          msg = ev.text_ru
+        end
+        local day = ev.total_day or ev.day or 0
+        table.insert(lines, string.format("[день %d] %s", day, msg))
         shown = shown + 1
       end
     end
   end
 
-  show_formspec(player_name, "aliveworld_player:world", "AliveWorld State", table.concat(lines, "\n"))
+  show_formspec(player_name, "aliveworld_player:world", "Состояние мира", table.concat(lines, "\n"))
 end
 
 -- show_chronicle: last 10 meaningful entries
@@ -183,7 +187,7 @@ end
 function aliveworld_player.show_chronicle(player_name)
   local lines = {}
 
-  table.insert(lines, "=== Chronicle ===")
+  table.insert(lines, "=== Летопись ===")
   table.insert(lines, "")
 
   if aliveworld and aliveworld.get_events then
@@ -198,109 +202,109 @@ function aliveworld_player.show_chronicle(player_name)
           msg = ev.text_ru
         end
         local day = ev.total_day or ev.day or 0
-        table.insert(lines, string.format("[day %d] %s", day, msg))
+        table.insert(lines, string.format("[день %d] %s", day, msg))
         shown = shown + 1
       end
     end
     if shown == 0 then
-      table.insert(lines, "Chronicle is empty.")
+      table.insert(lines, "Записей пока нет.")
     end
   else
-    table.insert(lines, "Chronicle not available.")
+    table.insert(lines, "Летопись недоступна.")
   end
 
-  show_formspec(player_name, "aliveworld_player:chronicle", "AliveWorld Chronicle", table.concat(lines, "\n"))
+  show_formspec(player_name, "aliveworld_player:chronicle", "Летопись", table.concat(lines, "\n"))
 end
 
 -- Chat commands
 
 minetest.register_chatcommand("aw_news", {
   params = "",
-  description = "Show active rumors",
+  description = "Показать активные слухи",
   privs = {interact = true},
   func = function(player_name)
     if not player_name or player_name == "" then
-      return false, "Use /aw_news in-game to open the news UI."
+      return false, "Используйте /aw_news в игре."
     end
     aliveworld_player.show_news(player_name)
-    return true, "Opening AliveWorld News..."
+    return true, "Открываю новости мира..."
   end,
 })
 
 minetest.register_chatcommand("aw_world", {
   params = "",
-  description = "Show world state overview",
+  description = "Показать состояние мира",
   privs = {interact = true},
   func = function(player_name)
     if not player_name or player_name == "" then
-      return false, "Use /aw_world in-game to open world state."
+      return false, "Используйте /aw_world в игре."
     end
     aliveworld_player.show_world(player_name)
-    return true, "Opening AliveWorld State..."
+    return true, "Открываю состояние мира..."
   end,
 })
 
 minetest.register_chatcommand("aw_chronicle_read", {
   params = "",
-  description = "Show recent chronicle entries",
+  description = "Показать записи летописи",
   privs = {interact = true},
   func = function(player_name)
     if not player_name or player_name == "" then
-      return false, "Use /aw_chronicle_read in-game to read the chronicle."
+      return false, "Используйте /aw_chronicle_read в игре."
     end
     aliveworld_player.show_chronicle(player_name)
-    return true, "Opening Chronicle..."
+    return true, "Открываю летопись..."
   end,
 })
 
 minetest.register_chatcommand("aw_help", {
   params = "",
-  description = "AliveWorld player command help",
+  description = "Справка по командам игрока",
   privs = {interact = true},
   func = function()
     local lines = {}
-    table.insert(lines, "=== AliveWorld Player Commands ===")
-    table.insert(lines, "/aw_news — show active rumors")
-    table.insert(lines, "/aw_world — show world state")
-    table.insert(lines, "/aw_chronicle_read — read chronicle")
-    table.insert(lines, "/aw_help — this help")
+    table.insert(lines, "=== Команды игрока AliveWorld ===")
+    table.insert(lines, "/aw_news — показать активные слухи")
+    table.insert(lines, "/aw_world — показать состояние мира")
+    table.insert(lines, "/aw_chronicle_read — прочитать летопись")
+    table.insert(lines, "/aw_help — эта справка")
     table.insert(lines, "")
-    table.insert(lines, "Place a Rumor Board in the world for quick news access.")
+    table.insert(lines, "Установите Доску слухов в мире для быстрого доступа к новостям.")
     return true, table.concat(lines, "\n")
   end,
 })
 
--- Rumor Board node
-
-local board_texture
-
-if minetest.get_modpath("mcl_core") then
-  local ok = pcall(function()
-    local def = minetest.registered_items["mcl_core:wood"]
-    if def and def.tiles then
-      board_texture = def.tiles[1]
-    else
-      board_texture = "mcl_core_wood.png"
-    end
-  end)
-  if not ok then
-    board_texture = "mcl_core_wood.png"
-  end
-elseif minetest.get_modpath("default") then
-  board_texture = "default_wood.png"
-else
-  board_texture = "[colorize:#8B4513"
-end
+-- Rumor Board node — wall-mounted notice board
 
 minetest.register_node("aliveworld_player:rumor_board", {
   description = "Rumor Board (AliveWorld)",
-  tiles = {board_texture},
-  groups = {choppy = 2, oddly_breakable_by_hand = 2, flammable = 3},
+  drawtype = "signlike",
+  tiles = {"aliveworld_rumor_board_front.png"},
+  inventory_image = "aliveworld_rumor_board_front.png",
+  wield_image = "aliveworld_rumor_board_front.png",
+  paramtype = "light",
+  paramtype2 = "wallmounted",
+  sunlight_propagates = true,
+  walkable = false,
+  groups = {dig_immediate = 2, attached_node = 1},
   sounds = (minetest.get_sound_def and minetest.get_sound_def("wood")) or nil,
+  selection_box = {
+    type = "wallmounted",
+    wall_top = {-0.45, 0.4375, -0.45, 0.45, 0.5, 0.45},
+    wall_bottom = {-0.45, -0.5, -0.45, 0.45, -0.4375, 0.45},
+    wall_side = {-0.5, -0.45, -0.45, -0.4375, 0.45, 0.45},
+  },
+  collision_box = {
+    type = "wallmounted",
+    wall_top = {-0.45, 0.4375, -0.45, 0.45, 0.5, 0.45},
+    wall_bottom = {-0.45, -0.5, -0.45, 0.45, -0.4375, 0.45},
+    wall_side = {-0.5, -0.45, -0.45, -0.4375, 0.45, 0.45},
+  },
   on_rightclick = function(pos, node, clicker, itemstack, pointed_thing)
-    if clicker and clicker:is_player() then
-      aliveworld_player.show_news(clicker:get_player_name())
+    if not clicker or not clicker:is_player() then
+      return itemstack
     end
+    aliveworld_player.show_news(clicker:get_player_name())
     return itemstack
   end,
 })
