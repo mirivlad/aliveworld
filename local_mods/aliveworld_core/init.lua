@@ -191,6 +191,10 @@ function aliveworld.tick()
       string.format("Day %d: season=%s food=%s wood=%s danger=%s",
         state.total_days, env.season.key, env.food.key, env.wood.key, env.danger.key),
       env)
+
+    if aliveworld.settlements and aliveworld.settlements.tick_all then
+      aliveworld.settlements.tick_all(aliveworld.get_date(), env)
+    end
   end
 
   return true, string.format("day %d, month %d, year %d (total: %d)",
@@ -226,6 +230,8 @@ function aliveworld.set_config(key, value)
 end
 
 load()
+
+dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
 
 local function tick_loop()
   if not state.paused then
@@ -382,6 +388,94 @@ minetest.register_chatcommand("aw_config", {
       c.tick_interval, c.days_per_month, c.months_per_year,
       c.total_days, (c.paused and "yes" or "no")
     )
+  end,
+})
+
+minetest.register_chatcommand("aw_settlements", {
+  params = "",
+  description = "List all settlements",
+  privs = {server = true},
+  func = function()
+    local list = aliveworld.settlements.list()
+    if #list == 0 then
+      return true, "No settlements. Use /aw_settlement_init to create."
+    end
+    local lines = {}
+    table.insert(lines, string.format("%-20s %-10s %-8s %-5s %-5s %-5s %-6s %-12s",
+      "Name", "Kind", "Pop", "Food", "Wood", "Safe", "Mood", "Status"))
+    table.insert(lines, string.rep("-", 80))
+    for _, s in ipairs(list) do
+      table.insert(lines, string.format("%-20s %-10s %-8d %-5d %-5d %-5d %-6d %-12s",
+        s.name, s.kind, s.population, s.food, s.wood, s.safety, s.mood, s.status))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_settlement", {
+  params = "<id>",
+  description = "Show detailed information about a settlement",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_settlement <id>"
+    end
+    local s = aliveworld.settlements.get(param)
+    if not s then
+      return false, "Settlement not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("Settlement: %s (%s)", s.name, s.id))
+    table.insert(lines, string.format("Kind: %s", s.kind))
+    table.insert(lines, string.format("Population: %d", s.population))
+    table.insert(lines, string.format("Food: %d/100", s.food))
+    table.insert(lines, string.format("Wood: %d/100", s.wood))
+    table.insert(lines, string.format("Safety: %d/100", s.safety))
+    table.insert(lines, string.format("Mood: %d", s.mood))
+    table.insert(lines, string.format("Prosperity: %d/100", s.prosperity))
+    table.insert(lines, string.format("Faction: %s", s.faction_id))
+    table.insert(lines, string.format("Status: %s", s.status))
+    table.insert(lines, string.format("Created: day %d", s.created_day))
+    table.insert(lines, string.format("Last tick: day %d", s.last_tick_day))
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_settlement_init", {
+  params = "",
+  description = "Create initial settlements",
+  privs = {server = true},
+  func = function()
+    local ok, msg = aliveworld.settlements.ensure_initial()
+    return ok, msg
+  end,
+})
+
+minetest.register_chatcommand("aw_settlement_tick", {
+  params = "",
+  description = "Force settlement simulation tick",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.bridge or not aliveworld.bridge.get_environment_profile then
+      return false, "No bridge module loaded"
+    end
+    local d = aliveworld.get_date()
+    local env = aliveworld.bridge.get_environment_profile(d)
+    aliveworld.settlements.tick_all(d, env)
+    return true, "Settlement tick complete."
+  end,
+})
+
+minetest.register_chatcommand("aw_settlement_reset", {
+  params = "[confirm]",
+  description = "Delete all settlements and recreate initial ones",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param ~= "confirm" then
+      return false, "WARNING: this will delete all settlement data. Use /aw_settlement_reset confirm"
+    end
+    local ok, msg = aliveworld.settlements.reset_all()
+    return ok, msg
   end,
 })
 

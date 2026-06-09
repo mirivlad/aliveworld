@@ -80,6 +80,11 @@ docker attach luanti-aliveworld
 /aw_pause
 /aw_resume
 /aw_config
+/aw_settlements         # list all settlements
+/aw_settlement <id>     # detailed info about a settlement
+/aw_settlement_init     # create initial settlements
+/aw_settlement_tick     # force settlement simulation tick
+/aw_settlement_reset    # delete and recreate settlements
 ```
 
 > **ASCII output**: Server-console commands intentionally use ASCII/English because the ncurses terminal inside Docker may render Cyrillic incorrectly. Russian text (`label_ru`) is preserved in bridge profiles and chronicle event `data` for the future in-game UI layer.
@@ -155,6 +160,8 @@ luanti-aliveworld/
 
   local_mods/               # наши моды (под git)
     aliveworld_core/        # ядро симуляции
+      init.lua
+      settlements.lua       # модель и симуляция поселений
     aliveworld_bridge_mcl/  # мост к Mineclonia
     aliveworld_admin/       # админ-инструменты (/aw_status, /aw_bridge)
 

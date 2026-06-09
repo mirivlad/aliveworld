@@ -126,6 +126,37 @@ if ! grep -q "aw_status" "$ROOT/local_mods/aliveworld_admin/init.lua"; then
   exit 1
 fi
 
+# Settlements checks
+if ! grep -q "aliveworld.settlements" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must set up aliveworld.settlements"
+  exit 1
+fi
+
+if ! grep -q "ensure_initial" "$ROOT/local_mods/aliveworld_core/settlements.lua"; then
+  echo "settlements.lua must have ensure_initial"
+  exit 1
+fi
+
+if ! grep -q "tick_all" "$ROOT/local_mods/aliveworld_core/settlements.lua"; then
+  echo "settlements.lua must have tick_all"
+  exit 1
+fi
+
+if ! grep -q "aw_settlements" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_settlements command"
+  exit 1
+fi
+
+if ! grep -q "aw_settlement_reset" "$ROOT/local_mods/aliveworld_core/init.lua"; then
+  echo "aliveworld_core must register /aw_settlement_reset command"
+  exit 1
+fi
+
+if ! grep -q "ASCII output" "$ROOT/README.md"; then
+  echo "README.md must contain ASCII output note"
+  exit 1
+fi
+
 # No forbidden hardcoded paths
 if grep -R "/opt/luanti-aliveworld" "$ROOT" \
   --exclude-dir=.git \
