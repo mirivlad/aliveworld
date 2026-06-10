@@ -155,7 +155,8 @@ function aliveworld_player.show_news(player_name, player_pos)
         y = y + 0.4
         table.insert(formspec, "label[0.4," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("  Истекает на день " .. r.expires_day), "]")
         if site_id then
-          table.insert(formspec, "button[7," .. string.format("%.1f", y - 0.1) .. ";2.8,0.5;track_" .. site_id .. ";Отслеживать]")
+          table.insert(formspec, "button[7," .. string.format("%.1f", y - 0.1) .. ";1.5,0.5;track_" .. site_id .. ";Отслеживать]")
+          table.insert(formspec, "button[8.5," .. string.format("%.1f", y - 0.1) .. ";1.3,0.5;detail_" .. r.id .. ";Подробнее]")
         end
         y = y + 0.6
       end
@@ -166,29 +167,172 @@ function aliveworld_player.show_news(player_name, player_pos)
   minetest.show_formspec(player_name, NEWS_FORMSPEC, table.concat(formspec))
 end
 
--- Handle rumor board button clicks
-minetest.register_on_player_receive_fields(function(player, formname, fields)
-  if formname ~= NEWS_FORMSPEC then return end
-  local pname = player:get_player_name()
-  for field, _ in pairs(fields) do
-    local prefix = "track_"
-    if field:sub(1, #prefix) == prefix then
-      local site_id = field:sub(#prefix + 1)
-      if site_id and site_id ~= "" and aliveworld_player.tracking then
-        local ok, msg = aliveworld_player.tracking.track_site(pname, site_id, {source = "rumor_board"})
-        if ok then
-          minetest.chat_send_player(pname, "Waypoint установлен: " .. site_id)
-          -- Auto-enable GPS
-          if aliveworld_player.radar and aliveworld_player.radar.enable then
-            aliveworld_player.radar.enable(pname)
-            minetest.chat_send_player(pname, "AliveWorld GPS включён.")
-          end
-        else
-          minetest.chat_send_player(pname, "Ошибка: " .. tostring(msg))
-        end
-        minetest.close_formspec(pname, "")
+-- Show detailed information about a rumor
+local DETAIL_FORMSPEC = "aliveworld_player:rumor_detail"
+
+function aliveworld_player.show_rumor_detail(player_name, rumor_id)
+  if not aliveworld.rumors then
+    minetest.chat_send_player(player_name, "Модуль слухов недоступен.")
+    return
+  end
+  local rumor = aliveworld.rumors.get(rumor_id)
+  if not rumor then
+    minetest.chat_send_player(player_name, "Слух не найден: " .. rumor_id)
+    return
+  end
+
+  local player_pos = get_player_pos(player_name)
+  local formspec = {}
+  table.insert(formspec, "formspec_version[4]")
+  table.insert(formspec, "size[10,12]")
+  table.insert(formspec, "label[0.2,0.2;", minetest.formspec_escape("=== Слух: подробнее ==="), "]")
+
+  local y = 0.8
+  local text = aliveworld_player.get_display_text(rumor)
+  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Слух: " .. text), "]")
+  y = y + 0.6
+  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("ID: " .. rumor.id), "]")
+  y = y + 0.4
+  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Истекает: день " .. rumor.expires_day), "]")
+  y = y + 0.6
+
+  -- Find associated site
+  local site_id = nil
+  local site = nil
+  if has_sites() and rumor.event_id then
+    site = aliveworld.sites.find_by_event(rumor.event_id)
+    if site and site.status == "active" then
+      site_id = site.id
+      local phys = site.physical_status or "abstract"
+      local target_pos = site.pos
+      if aliveworld.sites.resolve_arrival_pos then
+        local arrival = aliveworld.sites.resolve_arrival_pos(site)
+        if arrival then target_pos = arrival end
       end
-      return true
+      local dist_str = ""
+      if player_pos then
+        local dx = target_pos.x - player_pos.x
+        local dz = target_pos.z - player_pos.z
+        local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+        local dir = aliveworld.sites.direction_name_ru(player_pos, target_pos)
+        dist_str = string.format("%d блоков на %s", dist, dir)
+      end
+      local phys_label = (phys == "anchored" or phys == "materialized") and "отмечено" or "не отмечено"
+      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Место: " .. (site.name or site_id) .. " (" .. phys_label .. ")"), "]")
+      y = y + 0.4
+      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Расстояние: " .. dist_str), "]")
+      y = y + 0.6
+    end
+  end
+
+  -- Check current tracking status
+  local is_tracking = false
+  local track_status = "неизвестно"
+  if aliveworld.tracking then
+    local track = aliveworld.tracking.get_active_track(player_name)
+    if track and site_id and track.site_id == site_id then
+      is_tracking = true
+      track_status = "отслеживается"
+      if track.has_arrived then
+        track_status = "посещено"
+      end
+    end
+  end
+  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Статус: " .. track_status), "]")
+  y = y + 0.6
+
+  -- Actions
+  if site_id then
+    if is_tracking then
+      table.insert(formspec, "button[0.2," .. string.format("%.1f", y) .. ";4,0.6;detail_untrack_" .. site_id .. ";Снять трек]")
+    else
+      table.insert(formspec, "button[0.2," .. string.format("%.1f", y) .. ";4,0.6;detail_track_" .. site_id .. ";Отслеживать]")
+    end
+  end
+  table.insert(formspec, "button[4.5," .. string.format("%.1f", y) .. ";2.5,0.6;detail_back;Назад]")
+  y = y + 0.8
+
+  table.insert(formspec, "button_exit[8.5," .. string.format("%.1f", y) .. ";1.5,0.6;detail_close;Закрыть]")
+  minetest.show_formspec(player_name, DETAIL_FORMSPEC, table.concat(formspec))
+end
+
+-- Handle rumor board and detail button clicks
+local function handle_track_click(pname, site_id)
+  if not aliveworld_player.tracking then
+    minetest.chat_send_player(pname, "Ошибка: модуль отслеживания недоступен.")
+    return
+  end
+  local ok, msg = aliveworld_player.tracking.track_site(pname, site_id, {source = "rumor_board"})
+  if ok then
+    minetest.chat_send_player(pname, "Waypoint установлен: " .. site_id)
+    if aliveworld_player.radar and aliveworld_player.radar.enable then
+      aliveworld_player.radar.enable(pname)
+      minetest.chat_send_player(pname, "AliveWorld GPS включён.")
+    end
+  else
+    minetest.chat_send_player(pname, "Ошибка: " .. tostring(msg))
+  end
+end
+
+minetest.register_on_player_receive_fields(function(player, formname, fields)
+  local pname = player:get_player_name()
+
+  -- News formspec handler
+  if formname == NEWS_FORMSPEC then
+    for field, _ in pairs(fields) do
+      local track_prefix = "track_"
+      if field:sub(1, #track_prefix) == track_prefix then
+        local site_id = field:sub(#track_prefix + 1)
+        if site_id and site_id ~= "" then
+          handle_track_click(pname, site_id)
+          minetest.close_formspec(pname, "")
+        end
+        return true
+      end
+      local detail_prefix = "detail_"
+      if field:sub(1, #detail_prefix) == detail_prefix then
+        local rumor_id = field:sub(#detail_prefix + 1)
+        if rumor_id and rumor_id ~= "" then
+          aliveworld_player.show_rumor_detail(pname, rumor_id)
+        end
+        return true
+      end
+    end
+  end
+
+  -- Detail formspec handler
+  if formname == DETAIL_FORMSPEC then
+    for field, _ in pairs(fields) do
+      if field == "detail_back" then
+        -- Return to news list
+        local player_pos = get_player_pos(pname)
+        aliveworld_player.show_news(pname, player_pos)
+        return true
+      end
+      local track_prefix = "detail_track_"
+      if field:sub(1, #track_prefix) == track_prefix then
+        local site_id = field:sub(#track_prefix + 1)
+        if site_id and site_id ~= "" then
+          handle_track_click(pname, site_id)
+          minetest.close_formspec(pname, "")
+        end
+        return true
+      end
+      local untrack_prefix = "detail_untrack_"
+      if field:sub(1, #untrack_prefix) == untrack_prefix then
+        local site_id = field:sub(#untrack_prefix + 1)
+        if site_id and site_id ~= "" then
+          if aliveworld.tracking then
+            aliveworld.tracking.untrack(pname)
+          end
+          if aliveworld_player.tracking then
+            aliveworld_player.tracking.untrack(pname)
+          end
+          minetest.chat_send_player(pname, "Трек снят.")
+          minetest.close_formspec(pname, "")
+        end
+        return true
+      end
     end
   end
 end)
