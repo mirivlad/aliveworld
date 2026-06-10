@@ -3,7 +3,8 @@
 
 aliveworld_player.tracking = {}
 
-local hud_ids = {}  -- player_name -> hud_id
+local hud_ids = {}  -- player_name -> hud_id (waypoint)
+local info_hud_ids = {}  -- player_name -> info_text hud_id (compact distance/status line)
 
 local COLORS = {
   settlement = 0x00CC44,
@@ -31,10 +32,16 @@ end
 
 local function remove_hud(player_name)
   local player = minetest.get_player_by_name(player_name)
-  if player and hud_ids[player_name] then
-    player:hud_remove(hud_ids[player_name])
+  if player then
+    if hud_ids[player_name] then
+      player:hud_remove(hud_ids[player_name])
+    end
+    if info_hud_ids[player_name] then
+      player:hud_remove(info_hud_ids[player_name])
+    end
   end
   hud_ids[player_name] = nil
+  info_hud_ids[player_name] = nil
 end
 
 local function add_hud(player_name, site, target_pos)
@@ -45,11 +52,28 @@ local function add_hud(player_name, site, target_pos)
   local color = get_color(site)
   local track = aliveworld.tracking and aliveworld.tracking.get_active_track(player_name)
   local precision = track and track.precision or "approximate"
-  local title = site.name_en or site.id
-  if precision == "approximate" then
-    title = "AW: " .. title .. " (примерная область)"
+  -- Compose short display name: settlement name + event type label
+  local short_name
+  if site.type == "event" then
+    local settlement_name = site.settlement_id or ""
+    local subtype_labels = {
+      dangerous_roads = "опасная дорога",
+      food_shortage = "нехватка еды",
+      winter_hardship = "зимние трудности",
+      unrest = "беспорядки",
+      trade_opportunity = "торговля",
+      recovery = "восстановление",
+      default = "событие",
+    }
+    local label = subtype_labels[site.subtype] or subtype_labels.default
+    short_name = settlement_name .. " — " .. label
   else
-    title = "AW: " .. title
+    short_name = site.name or site.name_en or site.id
+  end
+  if precision == "approximate" then
+    title = "AW: " .. short_name .. " (примерная область)"
+  else
+    title = "AW: " .. short_name
   end
 
   local hud_id = player:hud_add({
@@ -63,6 +87,21 @@ local function add_hud(player_name, site, target_pos)
   if not hud_id then return false, "Failed to add HUD element" end
 
   hud_ids[player_name] = hud_id
+
+  -- Add compact info text HUD (tracking status + distance)
+  local info_hud = player:hud_add({
+    hud_elem_type = "text",
+    position = {x = 0, y = 0},
+    offset = {x = 10, y = 10},
+    text = "AW track: " .. short_name,
+    alignment = {x = 0, y = 0},
+    scale = {x = 100, y = 100},
+    number = 0xFFFFFF,
+  })
+  if info_hud then
+    info_hud_ids[player_name] = info_hud
+  end
+
   return true, precision
 end
 
@@ -179,6 +218,19 @@ function aliveworld_player.tracking.refresh_player(player)
       add_hud(pname, site, track.target_pos)
     end
   end
+  -- Update info text with distance
+  if info_hud_ids[pname] and track.target_pos then
+    local ppos = player:get_pos()
+    if ppos then
+      local dx = track.target_pos.x - ppos.x
+      local dz = track.target_pos.z - ppos.z
+      local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+      local track_name = track.title or ""
+      local precision_label = (track.precision == "approximate") and "· примерная область" or ""
+      local info_text = string.format("AW: %s · %d м %s", track_name, dist, precision_label)
+      player:hud_change(info_hud_ids[pname], "text", info_text)
+    end
+  end
 end
 
 function aliveworld_player.tracking.refresh_all()
@@ -186,5 +238,15 @@ function aliveworld_player.tracking.refresh_all()
     aliveworld_player.tracking.refresh_player(player)
   end
 end
+
+-- Globalstep to update info HUD
+local info_tick = 0
+minetest.register_globalstep(function(dtime)
+  info_tick = info_tick + dtime
+  if info_tick >= 1.0 then
+    info_tick = 0
+    aliveworld_player.tracking.refresh_all()
+  end
+end)
 
 minetest.log("action", "[aliveworld_player] tracking module loaded")
