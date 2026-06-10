@@ -264,6 +264,7 @@ dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/tracking.lua")
 
 if aliveworld.sites and aliveworld.sites.ensure_initial_settlement_sites then
   aliveworld.sites.ensure_initial_settlement_sites()

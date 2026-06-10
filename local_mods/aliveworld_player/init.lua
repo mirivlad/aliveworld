@@ -93,15 +93,18 @@ end
 
 -- show_news: active rumors
 
+local NEWS_FORMSPEC = "aliveworld_player:news"
+
 function aliveworld_player.show_news(player_name, player_pos)
-  local lines = {}
+  local formspec = {}
+  table.insert(formspec, "formspec_version[4]")
+  table.insert(formspec, "size[10,12]")
+  table.insert(formspec, "label[0.2,0.2;", minetest.formspec_escape("=== Новости мира ==="), "]")
 
-  table.insert(lines, "=== Новости мира ===")
-  table.insert(lines, "")
-
+  local y = 0.8
   if aliveworld and aliveworld.get_date then
-    table.insert(lines, aliveworld_player.format_date())
-    table.insert(lines, "")
+    table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape(aliveworld_player.format_date()), "]")
+    y = y + 0.6
   end
 
   if has_rumors() then
@@ -114,40 +117,82 @@ function aliveworld_player.show_news(player_name, player_pos)
     end
 
     if #active == 0 then
-      table.insert(lines, "Пока мир молчит. Слухов нет.")
+      y = y + 0.2
+      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Пока мир молчит. Слухов нет."), "]")
     else
-      table.insert(lines, string.format("=== Активные слухи (%d) ===", #active))
-      table.insert(lines, "")
+      y = y + 0.2
+      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape(string.format("Активные слухи (%d)", #active)), "]")
+      y = y + 0.6
       for _, r in ipairs(active) do
         local text = aliveworld_player.get_display_text(r)
+        local site = nil
+        local site_id = nil
         if has_sites() and player_pos and r.event_id then
-          local site = aliveworld.sites.find_by_event(r.event_id)
+          site = aliveworld.sites.find_by_event(r.event_id)
           if site and site.status == "active" then
+            site_id = site.id
             local phys = site.physical_status or "abstract"
+            local target_pos = site.pos
+            if aliveworld.sites.resolve_arrival_pos then
+              local arrival = aliveworld.sites.resolve_arrival_pos(site)
+              if arrival then target_pos = arrival end
+            end
             if phys == "anchored" or phys == "materialized" then
-              local direction = aliveworld.sites.format_direction_ru(player_pos, site.pos)
+              local direction = aliveworld.sites.format_direction_ru(player_pos, target_pos)
               text = text .. " — " .. direction
             else
-              local dir = aliveworld.sites.direction_name_ru(player_pos, site.pos)
-              text = text .. " — место пока не отмечено, слух указывает примерное направление: " .. dir
+              local dir = aliveworld.sites.direction_name_ru(player_pos, target_pos)
+              text = text .. " — место не отмечено, примерное направление: " .. dir
             end
           end
         end
-        table.insert(lines, string.format("• %s", text))
-        table.insert(lines, string.format("  Истекает на день %d", r.expires_day))
-        if has_sites() and r.event_id then
-          local site = aliveworld.sites.find_by_event(r.event_id)
-          if site then
-            table.insert(lines, string.format("  Отследить: /aw_track %s", site.id))
-          end
+        -- Truncate long rumor text for formspec display
+        local display_text = text
+        if #display_text > 60 then
+          display_text = display_text:sub(1, 58) .. ".."
         end
-        table.insert(lines, "")
+        table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("• " .. display_text), "]")
+        y = y + 0.4
+        table.insert(formspec, "label[0.4," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("  Истекает на день " .. r.expires_day), "]")
+        if site_id then
+          table.insert(formspec, "button[7," .. string.format("%.1f", y - 0.1) .. ";2.8,0.5;track_" .. site_id .. ";Отслеживать]")
+        end
+        y = y + 0.6
       end
     end
   end
 
-  show_formspec(player_name, "aliveworld_player:news", "Новости мира", table.concat(lines, "\n"))
+  table.insert(formspec, "button_exit[8.5," .. string.format("%.1f", y + 0.3) .. ";1.5,0.6;close;Закрыть]")
+  minetest.show_formspec(player_name, NEWS_FORMSPEC, table.concat(formspec))
 end
+
+-- Handle rumor board button clicks
+minetest.register_on_player_receive_fields(function(player, formname, fields)
+  if formname ~= NEWS_FORMSPEC then return end
+  local pname = player:get_player_name()
+  for field, _ in pairs(fields) do
+    local prefix = "track_"
+    if field:sub(1, #prefix) == prefix then
+      local site_id = field:sub(#prefix + 1)
+      if site_id and site_id ~= "" and aliveworld_player.tracking then
+        local ok, msg = aliveworld_player.tracking.track_site(pname, site_id)
+        if ok then
+          minetest.chat_send_player(pname, "Waypoint установлен: " .. site_id)
+          -- Auto-enable GPS
+          if aliveworld_player.radar and aliveworld_player.radar.enable then
+            local _, gps_msg = aliveworld_player.radar.enable(pname)
+            minetest.chat_send_player(pname, "AliveWorld GPS включён.")
+          end
+        else
+          minetest.chat_send_player(pname, "Ошибка: " .. tostring(msg))
+        end
+        -- Close the formspec after clicking track
+        minetest.close_formspec(pname, "")
+      end
+      return true
+    end
+  end
+end)
 
 -- show_world: world state overview
 
@@ -644,7 +689,24 @@ minetest.register_chatcommand("aw_track", {
     if not aliveworld_player.tracking then
       return false, "Tracking module not loaded."
     end
-    return aliveworld_player.tracking.track_site(player_name, param)
+    local ok, msg = aliveworld_player.tracking.track_site(player_name, param)
+    if ok then
+      -- Append distance to arrival_pos
+      local player = minetest.get_player_by_name(player_name)
+      if player then
+        local ppos = player:get_pos()
+        local site = aliveworld.sites and aliveworld.sites.get(param)
+        if site and ppos then
+          local arrival_pos = aliveworld.sites.resolve_arrival_pos and aliveworld.sites.resolve_arrival_pos(site)
+          if not arrival_pos then arrival_pos = site.anchor_pos or site.pos end
+          local dx = arrival_pos.x - ppos.x
+          local dz = arrival_pos.z - ppos.z
+          local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+          msg = msg .. string.format(" Расстояние: %d блоков.", dist)
+        end
+      end
+    end
+    return ok, msg
   end,
 })
 
@@ -693,26 +755,11 @@ minetest.register_chatcommand("aw_tracks", {
   description = "Показать текущий waypoint",
   privs = {interact = true},
   func = function(player_name)
-    if not aliveworld_player.tracking then
+    if not aliveworld.tracking then
       return false, "Tracking module not loaded."
     end
-    local list = aliveworld_player.tracking.list(player_name)
-    if #list == 0 then
-      return true, "Нет активных waypoint."
-    end
-    local t = list[1]
-    local lines = {"=== Текущий waypoint ==="}
-    if t.site then
-      table.insert(lines, string.format("Место: %s (%s)", t.site.name or t.site_id, t.site_id))
-      if t.precision == "approximate" then
-        table.insert(lines, "Точность: примерная (известно по слухам)")
-      else
-        table.insert(lines, "Точность: точная (место отмечено)")
-      end
-    else
-      table.insert(lines, string.format("Site ID: %s", t.site_id))
-    end
-    return true, table.concat(lines, "\n")
+    local desc = aliveworld.tracking.describe_track(player_name)
+    return true, desc
   end,
 })
 
@@ -724,24 +771,30 @@ minetest.register_chatcommand("aw_track_debug", {
     if not param or param == "" then
       return false, "Usage: /aw_track_debug <player_name>"
     end
-    if not aliveworld_player.tracking then
+    if not aliveworld.tracking then
       return false, "Tracking module not loaded."
     end
-    local list = aliveworld_player.tracking.list(param)
-    if #list == 0 then
+    local debug = aliveworld.tracking.get_debug_info(param)
+    if not debug then
       return false, "No active track for " .. param
     end
-    local t = list[1]
-    local site = t.site
     local lines = {}
-    table.insert(lines, string.format("Player: %s", param))
-    table.insert(lines, string.format("Tracked site: %s", t.site_id))
-    table.insert(lines, string.format("HUD ID: %s", tostring(t.hud_id)))
-    table.insert(lines, string.format("Precision: %s", t.precision))
-    if site then
+    table.insert(lines, string.format("Player: %s", debug.player_name))
+    table.insert(lines, string.format("Tracked site: %s", debug.site_id))
+    table.insert(lines, string.format("Title: %s", debug.title))
+    if debug.target_pos then
+      table.insert(lines, string.format("Target pos: (%d,%d,%d)", debug.target_pos.x, debug.target_pos.y, debug.target_pos.z))
+    end
+    table.insert(lines, string.format("Precision: %s", debug.precision))
+    table.insert(lines, string.format("Physical status: %s", debug.physical_status))
+    table.insert(lines, string.format("Has arrived: %s", tostring(debug.has_arrived)))
+    table.insert(lines, string.format("Arrival ack: %s", tostring(debug.has_arrival_ack)))
+    -- Show site details
+    local track = aliveworld.tracking.get_active_track(param)
+    if track and track.site then
+      local site = track.site
       table.insert(lines, string.format("Site name: %s", site.name_en or site.name))
       table.insert(lines, string.format("Site pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
-      table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
       if site.anchor_pos then
         table.insert(lines, string.format("Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
       end
@@ -768,10 +821,42 @@ minetest.register_chatcommand("aw_gps", {
     elseif param == "status" then
       local enabled = aliveworld_player.radar.is_enabled(player_name)
       local radius = aliveworld_player.radar.get_radius(player_name)
-      return true, string.format("AliveWorld Radar: %s. Радиус: %d блоков.", enabled and "включён" or "выключен", radius)
+      local origin = aliveworld_player.radar.get_origin_for_player(player_name)
+      local lines = {
+        string.format("AliveWorld Radar: %s", enabled and "включён" or "выключен"),
+        string.format("Радиус: %d блоков", radius),
+        string.format("Позиция: (%d, %d)", origin.x, origin.y),
+      }
+      if aliveworld_player.tracking then
+        local track_list = aliveworld_player.tracking.list(player_name)
+        table.insert(lines, string.format("Активные waypoint: %d", #track_list))
+      end
+      local points = aliveworld_player.radar.get_points_for_player and aliveworld_player.radar.get_points_for_player(player_name)
+      if points then
+        table.insert(lines, string.format("Отображается точек: %d", #points))
+      end
+      return true, table.concat(lines, "\n")
     else
       return aliveworld_player.radar.toggle(player_name)
     end
+  end,
+})
+
+minetest.register_chatcommand("aw_gps_pos", {
+  params = "<top-left|top-right|bottom-right|off>",
+  description = "Изменить позицию радара на экране",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not param or param == "" then
+      return false, "Укажите preset: top-left, top-right, bottom-right, off"
+    end
+    if not aliveworld_player.radar then
+      return false, "Radar module not loaded."
+    end
+    if not aliveworld_player.radar.set_origin_preset then
+      return false, "set_origin_preset not available."
+    end
+    return aliveworld_player.radar.set_origin_preset(player_name, param)
   end,
 })
 
@@ -810,6 +895,97 @@ minetest.register_chatcommand("aw_gps_near", {
     end
     return true, table.concat(lines, "\n")
   end,
+})
+
+minetest.register_chatcommand("aw_gps_debug", {
+  params = "",
+  description = "Debug: show GPS/radar/tracking state",
+  privs = {interact = true},
+  func = function(player_name)
+    local lines = {}
+    local player = minetest.get_player_by_name(player_name)
+    if not player then
+      return false, "Player not found."
+    end
+    local ppos = player:get_pos()
+    table.insert(lines, string.format("Player: %s", player_name))
+    table.insert(lines, string.format("Pos: (%d,%d,%d)", math.floor(ppos.x), math.floor(ppos.y), math.floor(ppos.z)))
+    table.insert(lines, "")
+    local radar_enabled = aliveworld_player.radar.is_enabled(player_name)
+    local radar_radius = aliveworld_player.radar.get_radius(player_name)
+    local radar_origin = aliveworld_player.radar.get_origin_for_player(player_name)
+    table.insert(lines, string.format("GPS enabled: %s", tostring(radar_enabled)))
+    table.insert(lines, string.format("Radar radius: %d", radar_radius))
+    table.insert(lines, string.format("Radar origin: (%d,%d)", radar_origin.x, radar_origin.y))
+    local radar_debug = aliveworld_player.radar.get_debug_info and aliveworld_player.radar.get_debug_info(player_name)
+    if radar_debug and radar_debug.hud_ids then
+      table.insert(lines, string.format("Radar HUD bg: %s", tostring(radar_debug.hud_ids.bg)))
+      table.insert(lines, string.format("Radar HUD player: %s", tostring(radar_debug.hud_ids.player)))
+      if radar_debug.hud_ids.pts then
+        for i, id in ipairs(radar_debug.hud_ids.pts) do
+          table.insert(lines, string.format("Radar HUD pt[%d]: %s", i, tostring(id)))
+        end
+      end
+    end
+    table.insert(lines, "")
+    local tracks = aliveworld_player.tracking.list(player_name)
+    table.insert(lines, string.format("Active tracks count: %d", #tracks))
+    for _, t in ipairs(tracks) do
+      table.insert(lines, string.format("  Site ID: %s", t.site_id))
+      table.insert(lines, string.format("  HUD ID: %s", tostring(t.hud_id)))
+      table.insert(lines, string.format("  Precision: %s", t.precision))
+      if t.site then
+        local site = t.site
+        table.insert(lines, string.format("  Title: %s", site.name_en or site.name))
+        table.insert(lines, string.format("  Site pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+        if site.anchor_pos then
+          table.insert(lines, string.format("  Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
+        end
+        if aliveworld.sites and aliveworld.sites.resolve_arrival_pos then
+          local arrival_pos = aliveworld.sites.resolve_arrival_pos(site)
+          if arrival_pos then
+            table.insert(lines, string.format("  Arrival pos: (%d,%d,%d)", arrival_pos.x, arrival_pos.y, arrival_pos.z))
+            local adx = arrival_pos.x - ppos.x
+            local adz = arrival_pos.z - ppos.z
+            local adist = math.floor(math.sqrt(adx*adx + adz*adz) + 0.5)
+            table.insert(lines, string.format("  Dist to arrival: %d", adist))
+          end
+        end
+        local phys = site.physical_status or "abstract"
+        local precision_label = (phys == "anchored" or phys == "materialized") and "точная" or "примерная"
+        table.insert(lines, string.format("  Precision label: %s", precision_label))
+        local dx = t.target_pos and (t.target_pos.x - ppos.x) or (site.pos.x - ppos.x)
+        local dz = t.target_pos and (t.target_pos.z - ppos.z) or (site.pos.z - ppos.z)
+        local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+        table.insert(lines, string.format("  Distance to target: %d", dist))
+      end
+    end
+    local points = aliveworld_player.radar and aliveworld_player.radar.get_points_for_player and aliveworld_player.radar.get_points_for_player(player_name)
+    if points then
+      table.insert(lines, "")
+      table.insert(lines, string.format("Radar displayed points: %d", #points))
+      local ppos2 = player:get_pos()
+      local from = {x = ppos2.x, y = ppos2.y, z = ppos2.z}
+      for i, s in ipairs(points) do
+        local dx = s.pos.x - from.x
+        local dz = s.pos.z - from.z
+        local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+        table.insert(lines, string.format("  [%d] %s (%s) dist=%d dx=%d dz=%d", i, s.id, s.name_en or s.name, dist, dx, dz))
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+-- Debug: close any open formspec via minetest API
+minetest.register_chatcommand("aw_clean_ui", {
+	params = "",
+	description = "Close any open formspec/UI on the client",
+	privs = {interact = true},
+	func = function(player_name)
+		minetest.close_formspec(player_name, "")
+		return true, "Formspec closed for " .. player_name
+	end,
 })
 
 -- Restore waypoint on join

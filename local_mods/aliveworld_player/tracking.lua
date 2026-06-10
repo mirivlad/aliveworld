@@ -1,10 +1,9 @@
--- tracking.lua
--- Waypoint tracking system for AliveWorld
+-- aliveworld_player/tracking.lua
+-- Player-facing waypoint tracking UI, delegates to aliveworld.tracking shared API
 
-local storage = minetest.get_mod_storage()
 aliveworld_player.tracking = {}
 
-local tracks = {}
+local hud_ids = {}  -- player_name -> hud_id
 
 local COLORS = {
   settlement = 0x00CC44,
@@ -30,99 +29,98 @@ local function get_color(site)
   return COLORS.default
 end
 
-function aliveworld_player.tracking.get_target_pos(site)
-  if not site then return nil, "no_site" end
-  if (site.physical_status == "anchored" or site.physical_status == "materialized") and site.anchor_pos then
-    return site.anchor_pos, "exact"
-  end
-  return site.pos, "approximate"
-end
-
 local function remove_hud(player_name)
-  local t = tracks[player_name]
-  if not t then return end
   local player = minetest.get_player_by_name(player_name)
-  if player and t.hud_id then
-    player:hud_remove(t.hud_id)
+  if player and hud_ids[player_name] then
+    player:hud_remove(hud_ids[player_name])
   end
-  tracks[player_name] = nil
+  hud_ids[player_name] = nil
 end
 
-local function add_hud(player_name, site)
+local function add_hud(player_name, site, target_pos)
   remove_hud(player_name)
-  local target_pos, precision = aliveworld_player.tracking.get_target_pos(site)
-  if not target_pos then return false, "No target position" end
-  local color = get_color(site)
   local player = minetest.get_player_by_name(player_name)
   if not player then return false, "Player not found" end
+
+  local color = get_color(site)
+  local track = aliveworld.tracking and aliveworld.tracking.get_active_track(player_name)
+  local precision = track and track.precision or "approximate"
+  local title = site.name_en or site.id
+  if precision == "approximate" then
+    title = "AW: " .. title .. " (примерная область)"
+  else
+    title = "AW: " .. title
+  end
+
   local hud_id = player:hud_add({
     hud_elem_type = "waypoint",
-    name = site.name_en or site.id,
+    name = title,
     text = "m",
     precision = 0,
     number = color,
     world_pos = target_pos,
   })
   if not hud_id then return false, "Failed to add HUD element" end
-  tracks[player_name] = {
-    track_type = "site",
-    track_id = site.id,
-    site_id = site.id,
-    hud_id = hud_id,
-    precision = precision,
-  }
-  local meta = player:get_meta()
-  meta:set_string("aliveworld_track_site_id", site.id)
+
+  hud_ids[player_name] = hud_id
   return true, precision
 end
 
-local function get_site_from_event(event_id)
-  if not aliveworld.sites then return nil end
-  return aliveworld.sites.find_by_event(event_id)
-end
-
 function aliveworld_player.tracking.track_site(player_name, site_id)
-  if not aliveworld.sites then return false, "Sites module not loaded" end
-  local site = aliveworld.sites.get(site_id)
-  if not site then return false, "Site not found: " .. site_id end
-  if site.status ~= "active" then return false, "Site is not active" end
-  local ok, precision = add_hud(player_name, site)
-  if not ok then return false, precision end
-  local site_name = site.name or site_id
-  if precision == "approximate" then
-    return true, "Waypoint установлен на " .. site_name .. ". Место известно только по слухам. Waypoint указывает примерную область."
+  if not aliveworld.tracking then
+    return false, "Tracking module not loaded"
   end
-  return true, "Waypoint установлен на " .. site_name .. "."
+  local result = aliveworld.tracking.track_site(player_name, site_id, {source = "player_command"})
+  if not result.ok then
+    local err_map = {
+      player_not_found = "Игрок не найден",
+      sites_module_not_loaded = "Модуль мест недоступен",
+      site_not_found = "Место не найдено: " .. site_id,
+    }
+    return false, err_map[result.error] or result.error
+  end
+
+  local site = aliveworld.sites.get(result.resolved_site_id)
+  if site then
+    local ok, precision = add_hud(player_name, site, result.target_pos)
+    if not ok then
+      return false, precision
+    end
+    local site_name = result.title or site_id
+    if precision == "approximate" then
+      return true, "Waypoint установлен на " .. site_name .. ". След ведёт к окрестностям. Это примерная область по слухам."
+    end
+    return true, "Waypoint установлен на " .. site_name .. "."
+  end
+  return true, "Waypoint установлен."
 end
 
 function aliveworld_player.tracking.track_event(player_name, event_id)
   if not aliveworld.sites then return false, "Sites module not loaded" end
-  local site = get_site_from_event(event_id)
+  local site = aliveworld.sites.find_by_event(event_id)
   if not site then return false, "No site found for event " .. event_id end
   return aliveworld_player.tracking.track_site(player_name, site.id)
 end
 
 function aliveworld_player.tracking.track_near(player_name, radius)
   radius = radius or 1000
+  if not aliveworld.tracking then return false, "Tracking module not loaded" end
+  if not aliveworld.sites then return false, "Sites module not loaded" end
   local player = minetest.get_player_by_name(player_name)
   if not player then return false, "Player not found" end
   local ppos = player:get_pos()
   if not ppos then return false, "Cannot get player position" end
   local from = {x = ppos.x, y = ppos.y, z = ppos.z}
-  if not aliveworld.sites then return false, "Sites module not loaded" end
   local near = aliveworld.sites.nearest(from, 30)
   local candidates = {}
   for _, s in ipairs(near) do
     if s.status ~= "active" then goto continue end
-    local dist = aliveworld.sites.distance(from, s.pos)
+    local to_pos = aliveworld.sites.get_display_pos(s)
+    local dist = aliveworld.sites.distance(from, to_pos)
     if dist > radius then goto continue end
     local phys = (s.physical_status == "anchored" or s.physical_status == "materialized")
     if s.type == "event" then
-      if phys then
-        table.insert(candidates, {site = s, priority = 1, dist = dist})
-      else
-        table.insert(candidates, {site = s, priority = 2, dist = dist})
-      end
+      table.insert(candidates, {site = s, priority = phys and 1 or 2, dist = dist})
     end
     if s.type == "settlement" and phys then
       table.insert(candidates, {site = s, priority = 3, dist = dist})
@@ -140,50 +138,44 @@ function aliveworld_player.tracking.track_near(player_name, radius)
 end
 
 function aliveworld_player.tracking.untrack(player_name, track_id)
-  if not track_id or track_id == "" or track_id == "all" then
-    remove_hud(player_name)
-    local player = minetest.get_player_by_name(player_name)
-    if player then player:get_meta():set_string("aliveworld_track_site_id", "") end
-    return true, "Waypoint убран."
-  end
-  local t = tracks[player_name]
-  if not t or t.track_id ~= track_id then
-    return false, "No active waypoint for " .. track_id
+  if not aliveworld.tracking then
+    return false, "Tracking module not loaded"
   end
   remove_hud(player_name)
-  local player = minetest.get_player_by_name(player_name)
-  if player then player:get_meta():set_string("aliveworld_track_site_id", "") end
-  return true, "Waypoint для " .. track_id .. " убран."
+  local result = aliveworld.tracking.untrack(player_name)
+  if result.had_track then
+    return true, "Waypoint для " .. result.site_id .. " убран."
+  end
+  return true, "Нет активного waypoint."
 end
 
 function aliveworld_player.tracking.clear(player_name)
-  remove_hud(player_name)
-  local player = minetest.get_player_by_name(player_name)
-  if player then player:get_meta():set_string("aliveworld_track_site_id", "") end
+  aliveworld_player.tracking.untrack(player_name)
 end
 
 function aliveworld_player.tracking.list(player_name)
-  local t = tracks[player_name]
-  if not t then return {} end
-  local site = aliveworld.sites and aliveworld.sites.get(t.site_id)
+  local track = aliveworld.tracking and aliveworld.tracking.get_active_track(player_name)
+  if not track then return {} end
   return {{
-    site_id = t.site_id,
-    site = site,
-    precision = t.precision,
-    hud_id = t.hud_id,
+    site_id = track.site_id,
+    site = track.site,
+    precision = track.precision,
+    hud_id = hud_ids[player_name],
+    target_pos = track.target_pos,
+    has_arrived = track.has_arrived,
   }}
 end
 
 function aliveworld_player.tracking.refresh_player(player)
-  local player_name = player:get_player_name()
-  local meta = player:get_meta()
-  local site_id = meta:get_string("aliveworld_track_site_id")
-  if site_id and site_id ~= "" and aliveworld.sites then
-    local site = aliveworld.sites.get(site_id)
-    if site and site.status == "active" then
-      add_hud(player_name, site)
-    else
-      meta:set_string("aliveworld_track_site_id", "")
+  if not player or not player:is_player() then return end
+  local pname = player:get_player_name()
+  if not aliveworld.tracking then return end
+  local track = aliveworld.tracking.get_active_track(pname)
+  if not track then return end
+  if not hud_ids[pname] then
+    local site = track.site
+    if site then
+      add_hud(pname, site, track.target_pos)
     end
   end
 end
