@@ -21,7 +21,7 @@ end
 function aliveworld.sites.direction_index(from_pos, to_pos)
   local dx = to_pos.x - from_pos.x
   local dz = to_pos.z - from_pos.z
-  local angle = math.deg(math.atan2(dz, dx))
+  local angle = math.deg(math.atan2(-dz, dx))
   local bearing = 90 - angle
   if bearing < 0 then bearing = bearing + 360 end
   if bearing >= 360 then bearing = bearing - 360 end

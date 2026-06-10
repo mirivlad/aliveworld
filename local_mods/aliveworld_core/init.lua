@@ -957,9 +957,11 @@ minetest.register_chatcommand("aw_site_debug", {
         local ppos = p:get_pos()
         if ppos then
           local from = {x = ppos.x, y = ppos.y, z = ppos.z}
+          local dx = site.pos.x - from.x
+          local dz = site.pos.z - from.z
           local dist = aliveworld.sites.distance(from, site.pos)
           local dir = aliveworld.sites.direction_name_en(from, site.pos)
-          table.insert(lines, string.format("  %s: dist=%d dir=%s", pname, dist, dir))
+          table.insert(lines, string.format("  %s: dist=%d dir=%s dx=%d dz=%d", pname, dist, dir, dx, dz))
         end
       end
     end
@@ -1047,15 +1049,18 @@ minetest.register_chatcommand("aw_compass", {
       return false, "Cannot get player position."
     end
     local from = {x = ppos.x, y = ppos.y, z = ppos.z}
+    local dx = site.pos.x - from.x
+    local dz = site.pos.z - from.z
     local dist = aliveworld.sites.distance(from, site.pos)
     local dir_en = aliveworld.sites.direction_name_en(from, site.pos)
     local dir_ru = aliveworld.sites.direction_name_ru(from, site.pos)
     local lines = {}
     table.insert(lines, string.format("Compass: %s -> %s (%s)", pname, site_id, site.name_en))
+    table.insert(lines, string.format("Player pos: (%d,%d,%d)", math.floor(from.x), math.floor(from.y), math.floor(from.z)))
+    table.insert(lines, string.format("Target pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+    table.insert(lines, string.format("dx=%d dz=%d", dx, dz))
     table.insert(lines, string.format("Distance: %d blocks", dist))
     table.insert(lines, string.format("Direction: %s (%s)", dir_en, dir_ru))
-    table.insert(lines, string.format("Target pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
-    table.insert(lines, string.format("Player pos: (%d,%d,%d)", math.floor(from.x), math.floor(from.y), math.floor(from.z)))
     table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
     if site.anchor_pos then
       local adist = aliveworld.sites.distance(from, site.anchor_pos)
