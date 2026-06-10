@@ -280,6 +280,17 @@ function aliveworld.tracking.check_arrival(player)
     aliveworld.rumors.sync_status_from_tracking(pname)
   end
 
+  -- Physical clue for abstract sites
+  if kind == "abstract" and aliveworld.sites and aliveworld.sites.place_clue_marker then
+    local clue_pos = track.target_pos
+    aliveworld.sites.place_clue_marker(clue_pos, track.site_id, pname)
+    local clue_text = ""
+    if track.site and track.site.event_type then
+      clue_text = " " .. aliveworld.sites.get_clue_texts(track.site.event_type)
+    end
+    msg = msg .. "\n[подсказка]" .. clue_text
+  end
+
   return {
     arrived = true,
     site = track.site,

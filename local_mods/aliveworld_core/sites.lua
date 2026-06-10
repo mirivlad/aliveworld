@@ -670,6 +670,150 @@ function aliveworld.sites.reset()
   minetest.log("action", "[aliveworld_core] all sites deleted")
 end
 
+-- Clue marker storage
+-- Maps clue_id -> {pos={x,y,z}, site_id, placed_at=os.time(), placed_for=player_name}
+local clue_markers = {}
+local CLUE_MAX_AGE = 300 -- 5 minutes
+
+local CLUES_KEY = "aliveworld_clue_markers"
+
+-- Clue text templates keyed by event type
+local CLUE_TEXTS = {
+  default = {
+    "Здесь есть следы недавнего пребывания.",
+    "Кто-то был здесь совсем недавно.",
+    "Приглядитесь — земля хранит следы.",
+    "Это место связано с событиями из слухов.",
+  },
+  flood = {
+    "Следы воды на камнях ещё свежи.",
+    "Водоросли и тина указывают на недавний разлив.",
+  },
+  fire = {
+    "Обгоревшие ветки валяются рядом.",
+    "Пепел ещё не развеялся по ветру.",
+  },
+  crash = {
+    "Обломки разбросаны по земле.",
+    "Металлический запах витает в воздухе.",
+  },
+  haunt = {
+    "Странный холодок пробегает по коже.",
+    "Следы на земле образуют непонятный узор.",
+  },
+}
+
+function aliveworld.sites.get_clue_texts(event_type)
+  local texts = CLUE_TEXTS[event_type] or CLUE_TEXTS.default
+  return texts[math.random(#texts)]
+end
+
+function aliveworld.sites.place_clue_marker(pos, site_id, player_name)
+  if not pos then return false end
+
+  -- Only place for abstract/non-anchor sites
+  local site = aliveworld.sites.get(site_id)
+  if not site then return false end
+  local has_anchor = site.anchor_pos and (site.anchor_pos.x ~= 0 or site.anchor_pos.y ~= 0 or site.anchor_pos.z ~= 0)
+  if has_anchor then return false end
+
+  -- Check if we already placed a clue for this site
+  for _, m in pairs(clue_markers) do
+    if m.site_id == site_id and m.placed_for == player_name then
+      return false -- already placed
+    end
+  end
+
+  -- Pick the best available marker node
+  local marker_name
+  if minetest.registered_nodes["default:torch"] then
+    marker_name = "default:torch"
+  elseif minetest.registered_nodes["bones:bones"] then
+    marker_name = "bones:bones"
+  elseif minetest.registered_nodes["default:sign_wall_wood"] then
+    marker_name = "default:sign_wall_wood"
+  elseif minetest.registered_nodes["flowers:rose"] then
+    marker_name = "flowers:rose"
+  else
+    -- Fallback: just log the clue position, no node placement
+    minetest.log("action", "[aliveworld_core] clue marker: no suitable node found for " .. site_id)
+    return false
+  end
+
+  -- Find safe ground position
+  local ground_pos = aliveworld.sites.resolve_marker_pos(site)
+  if not ground_pos then
+    ground_pos = {x = pos.x, y = pos.y, z = pos.z}
+  end
+
+  -- Place marker on top of ground
+  local node = minetest.get_node(ground_pos)
+  local def = minetest.registered_nodes[node.name]
+  local is_walkable = def and def.walkable
+
+  if is_walkable then
+    ground_pos = {x = ground_pos.x, y = ground_pos.y + 1, z = ground_pos.z}
+  end
+
+  -- Check if position is free
+  local above_node = minetest.get_node(ground_pos)
+  local above_def = minetest.registered_nodes[above_node.name]
+  if above_def and (above_def.walkable or above_def.liquidtype and above_def.liquidtype ~= "none") then
+    return false
+  end
+
+  minetest.set_node(ground_pos, {name = marker_name})
+
+  local clue_id = site_id .. "_" .. player_name .. "_" .. tostring(os.time())
+  clue_markers[clue_id] = {
+    pos = {x = ground_pos.x, y = ground_pos.y, z = ground_pos.z},
+    site_id = site_id,
+    placed_for = player_name,
+    placed_at = os.time(),
+  }
+  storage:set_string(CLUES_KEY, minetest.write_json(clue_markers))
+  return true
+end
+
+function aliveworld.sites.cleanup_old_clues()
+  local now = os.time()
+  local removed = 0
+  for id, m in pairs(clue_markers) do
+    if now - m.placed_at > CLUE_MAX_AGE then
+      local node = minetest.get_node(m.pos)
+      if node.name ~= "air" then
+        minetest.remove_node(m.pos)
+      end
+      clue_markers[id] = nil
+      removed = removed + 1
+    end
+  end
+  if removed > 0 then
+    storage:set_string(CLUES_KEY, minetest.write_json(clue_markers))
+  end
+  return removed
+end
+
+-- Periodic cleanup
+local function clue_cleanup_step()
+  aliveworld.sites.cleanup_old_clues()
+  minetest.after(CLUE_MAX_AGE, clue_cleanup_step)
+end
+
+-- Load clue marker positions and schedule cleanup
+local function load_clue_markers()
+  local raw = storage:get_string(CLUES_KEY)
+  if raw and raw ~= "" then
+    local ok, data = pcall(minetest.parse_json, raw)
+    if ok and data and next(data) then
+      clue_markers = data
+    end
+  end
+  minetest.after(CLUE_MAX_AGE, clue_cleanup_step)
+end
+
+load_clue_markers()
+
 local function load_all()
   local raw = storage:get_string(SITES_KEY)
   if raw and raw ~= "" then
