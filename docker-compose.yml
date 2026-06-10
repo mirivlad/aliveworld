@@ -12,6 +12,9 @@ services:
     volumes:
       - ./data:/config/.minetest
       - ./config/luanti.conf:/config/.minetest/minetest.conf
+      - ./local_mods/aliveworld_core:/config/.minetest/mods/aliveworld_core
+      - ./local_mods/aliveworld_player:/config/.minetest/mods/aliveworld_player
+      - ./local_mods/aliveworld_test_suite:/config/.minetest/mods/aliveworld_test_suite
     ports:
       - "30000:30000/udp"
     restart: unless-stopped

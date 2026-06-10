@@ -1144,4 +1144,69 @@ minetest.register_chatcommand("aw_compass", {
   end,
 })
 
-minetest.log("action", "[aliveworld_core] loaded")
+-- Runtime version info
+local function get_git_commit()
+  local f = io.open(".git/HEAD", "r")
+  if not f then
+    local modpath = minetest.get_modpath("aliveworld_core")
+    if modpath then
+      f = io.open(modpath .. "/../../.git/HEAD", "r")
+    end
+  end
+  if not f then return "unknown" end
+  local ref = f:read("*l")
+  f:close()
+  if ref and ref:match("^ref: ") then
+    local refpath = ".git/" .. ref:match("^ref: (.+)$")
+    local f2 = io.open(refpath, "r")
+    if f2 then
+      local hash = f2:read("*l")
+      f2:close()
+      return hash or "unknown"
+    end
+    local modpath = minetest.get_modpath("aliveworld_core")
+    if modpath then
+      f2 = io.open(modpath .. "/../../" .. refpath, "r")
+      if f2 then
+        local hash = f2:read("*l")
+        f2:close()
+        return hash or "unknown"
+      end
+    end
+  end
+  return ref or "unknown"
+end
+
+aliveworld.version = {
+  major = 0,
+  minor = 2,
+  patch = 0,
+  label = "dev",
+}
+aliveworld.version.git_commit = get_git_commit()
+aliveworld.version.schema_tracking = 1
+aliveworld.version.schema_rumor_ui = 1
+aliveworld.version.loaded_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+aliveworld.version.mod_path = minetest.get_modpath("aliveworld_core")
+
+minetest.register_chatcommand("aw_version", {
+  params = "",
+  description = "Show AliveWorld runtime version info",
+  privs = {interact = true},
+  func = function()
+    local v = aliveworld.version
+    local lines = {
+      "=== AliveWorld Runtime ===",
+      string.format("Version: %d.%d.%d-%s", v.major, v.minor, v.patch, v.label),
+      string.format("Commit: %s", v.git_commit),
+      string.format("Loaded at: %s", v.loaded_at),
+      string.format("Mod path: %s", v.mod_path or "N/A"),
+      string.format("Tracking schema: %d", v.schema_tracking),
+      string.format("Rumor UI schema: %d", v.schema_rumor_ui),
+    }
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.log("action", string.format("[aliveworld_core] loaded v%d.%d.%d-%s commit=%s",
+  aliveworld.version.major, aliveworld.version.minor, aliveworld.version.patch, aliveworld.version.label, aliveworld.version.git_commit))
