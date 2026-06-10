@@ -35,6 +35,9 @@ local test_files = {
 	"radar",
 	"anchors",
 	"rumors",
+	"tracking_state",
+	"rumors_flow",
+	"safety",
 }
 
 for _, file in ipairs(test_files) do
