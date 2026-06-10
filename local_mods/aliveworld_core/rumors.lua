@@ -108,8 +108,20 @@ function aliveworld.rumors.set_player_status(player_name, rumor_id, status)
     local ok, d = pcall(minetest.parse_json, raw)
     if ok and d then data = d end
   end
+  local old = data[rumor_id] or "new"
   data[rumor_id] = status
   player:get_meta():set_string("aliveworld_rumor_statuses", minetest.write_json(data))
+
+  -- Log status change to chronicle
+  if old ~= status then
+    local rumor = aliveworld.rumors.get(rumor_id)
+    local label = (aliveworld.rumors.get_status_label and aliveworld.rumors.get_status_label(status)) or status
+    local rumor_text = rumor and (rumor.text_ru or rumor.text_en or rumor_id) or rumor_id
+    aliveworld.add_event("rumor_status",
+      string.format("Player %s: rumor %s now %s (%s)", player_name, rumor_id, status, rumor_text),
+      {player = player_name, rumor_id = rumor_id, old_status = old, new_status = status}
+    )
+  end
 end
 
 -- Update rumor status based on tracking state (called periodically)
