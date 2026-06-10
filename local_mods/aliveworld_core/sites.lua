@@ -60,7 +60,27 @@ function aliveworld.sites.list(filter)
 end
 
 function aliveworld.sites.get(id)
-  return sites[id]
+  -- Direct match by id
+  local s = sites[id]
+  if s then return s end
+
+  -- Try with site_ prefix (e.g. "birch_ford" -> "site_birch_ford")
+  s = sites["site_" .. id]
+  if s then return s end
+
+  -- Fallback: search by settlement_id, prefer settlement-type
+  local fallback = nil
+  for _, site in pairs(sites) do
+    if site.settlement_id == id then
+      if site.type == "settlement" then
+        return site
+      end
+      if not fallback then
+        fallback = site
+      end
+    end
+  end
+  return fallback
 end
 
 function aliveworld.sites.save(site)
@@ -96,7 +116,12 @@ function aliveworld.sites.nearest(from_pos, limit)
   local sorted = {}
   for _, s in pairs(sites) do
     if s.status == "active" then
-      local dist = aliveworld.sites.distance(from_pos, s.pos)
+      local to_pos = s.anchor_pos or s.pos
+      if aliveworld.sites.resolve_arrival_pos then
+        local arrival = aliveworld.sites.resolve_arrival_pos(s)
+        if arrival then to_pos = arrival end
+      end
+      local dist = aliveworld.sites.distance(from_pos, to_pos)
       table.insert(sorted, {site = s, dist = dist})
     end
   end
@@ -206,6 +231,203 @@ function aliveworld.sites.ensure_initial_settlement_sites(created_day)
     storage:set_string(SITES_KEY, minetest.write_json(sites))
   end
   return created_count
+end
+
+-- Resolve a safe arrival position for a site.
+-- Finds surface ground near site.pos (or anchor_pos if available),
+-- avoiding liquid, inside-block, and mid-air positions.
+-- Returns {x, y, z} where a player can safely stand.
+function aliveworld.sites.resolve_arrival_pos(site)
+  if not site then return nil end
+  local base_pos = site.anchor_pos or site.pos
+  if not base_pos then return nil end
+
+  -- Search from above downward for a walkable surface
+  local start_y = 120
+  local search = {x = base_pos.x, y = start_y, z = base_pos.z}
+
+  -- Trigger chunk loading
+  minetest.emerge_area({x = base_pos.x, y = start_y, z = base_pos.z}, {x = base_pos.x, y = 0, z = base_pos.z})
+
+  for _ = 0, 120 do
+    local node = minetest.get_node(search)
+    if node.name == "ignore" then
+      -- Chunk not loaded yet, try emerge
+      minetest.emerge_area(search, search)
+      search.y = search.y - 1
+    else
+      local def = minetest.registered_nodes[node.name]
+      -- If this is air or non-walkable, check the block below as a surface candidate
+      if def and def.walkable == false then
+        local below = minetest.get_node({x = search.x, y = search.y - 1, z = search.z})
+        if below.name ~= "ignore" then
+          local def_below = minetest.registered_nodes[below.name]
+          if def_below and def_below.walkable ~= false then
+            local liquid = def_below.liquidtype and def_below.liquidtype ~= "none"
+            if not liquid then
+              return {x = search.x, y = search.y, z = search.z}
+            end
+          end
+        end
+      elseif def and def.liquidtype and def.liquidtype ~= "none" then
+        -- Liquid: skip, continue down
+      end
+      search.y = search.y - 1
+    end
+  end
+
+  -- Fallback: return original position
+  return {x = base_pos.x, y = base_pos.y + 1, z = base_pos.z}
+end
+
+-- Get the arrival position for a site, with metadata about precision
+function aliveworld.sites.get_arrival_info(site)
+  if not site then return nil, "no_site" end
+  local arrival = aliveworld.sites.resolve_arrival_pos(site)
+  if not arrival then return nil, "no_arrival" end
+  local phys = site.physical_status or "abstract"
+  if phys == "anchored" or phys == "materialized" then
+    return arrival, "exact"
+  end
+  return arrival, "approximate"
+end
+
+-- Check if a position is safe for a player to stand
+-- Returns {safe = bool, reasons = {string,...}}
+function aliveworld.sites.is_safe_standing_pos(pos)
+  if not pos then return {safe = false, reasons = {"no_position"}} end
+  local reasons = {}
+  local check_pos = {x = math.floor(pos.x + 0.5), y = math.floor(pos.y + 0.5), z = math.floor(pos.z + 0.5)}
+
+  -- Head node (where player's head would be)
+  local head = minetest.get_node(check_pos)
+  if head.name == "ignore" then
+    table.insert(reasons, "chunk_not_loaded")
+    return {safe = false, reasons = reasons}
+  end
+  local head_def = minetest.registered_nodes[head.name]
+  if head_def and head_def.walkable ~= false then
+    table.insert(reasons, "head_inside_block")
+    return {safe = false, reasons = reasons}
+  end
+  if head_def and head_def.liquidtype and head_def.liquidtype ~= "none" then
+    table.insert(reasons, "head_in_liquid")
+    -- Can still be safe briefly but we flag it
+  end
+
+  -- Feet node (where player's feet would be)
+  local feet = minetest.get_node({x = check_pos.x, y = check_pos.y - 1, z = check_pos.z})
+  if feet.name == "ignore" then
+    table.insert(reasons, "feet_chunk_not_loaded")
+    return {safe = false, reasons = reasons}
+  end
+  local feet_def = minetest.registered_nodes[feet.name]
+  if not feet_def then
+    table.insert(reasons, "feet_no_definition")
+    return {safe = false, reasons = reasons}
+  end
+  if feet_def.walkable == false then
+    table.insert(reasons, "feet_not_solid")
+    return {safe = false, reasons = reasons}
+  end
+  if feet_def.liquidtype and feet_def.liquidtype ~= "none" then
+    if head_def and head_def.liquidtype and head_def.liquidtype ~= "none" then
+      table.insert(reasons, "fully_submerged")
+    else
+      table.insert(reasons, "standing_in_liquid")
+    end
+  end
+
+  -- Below node (support block)
+  local below = minetest.get_node({x = check_pos.x, y = check_pos.y - 2, z = check_pos.z})
+  if below.name ~= "ignore" then
+    local below_def = minetest.registered_nodes[below.name]
+    if below_def and (below_def.walkable == false or (below_def.liquidtype and below_def.liquidtype ~= "none")) then
+      table.insert(reasons, "below_unsupported")
+    end
+  end
+
+  return {safe = #reasons == 0, reasons = reasons}
+end
+
+-- Resolve a safe observer position near a site (for awbot screenshots)
+-- Scans outward from arrival_pos to find a clear vantage point
+function aliveworld.sites.resolve_observer_pos(site)
+  if not site then return nil end
+  local base = aliveworld.sites.resolve_arrival_pos(site) or site.anchor_pos or site.pos
+  if not base then return nil end
+
+  -- Try the arrival position first (player standing there sees the site)
+  local result = aliveworld.sites.is_safe_standing_pos(base)
+  if result.safe then
+    -- Check that water is not directly in front (rough check)
+    local water_near = false
+    for wx = -1, 1 do
+      for wz = -1, 1 do
+        local wnode = minetest.get_node({x = base.x + wx, y = base.y, z = base.z + wz})
+        local wdef = minetest.registered_nodes[wnode.name]
+        if wdef and wdef.liquidtype and wdef.liquidtype ~= "none" then
+          water_near = true
+        end
+      end
+    end
+    if not water_near then
+      return base
+    end
+  end
+
+  -- Scan in a spiral outward from the base position
+  for r = 2, 16 do
+    for dx = -r, r do
+      for dz = -r, r do
+        if math.abs(dx) == r or math.abs(dz) == r then
+          local candidate = {x = base.x + dx, y = base.y, z = base.z + dz}
+          -- Find surface at this XZ
+          local surf = aliveworld.sites.resolve_arrival_pos({pos = candidate, anchor_pos = nil})
+          if surf then
+            local safe = aliveworld.sites.is_safe_standing_pos(surf)
+            if safe.safe then
+              return surf
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Fallback: return the arrival position
+  return base
+end
+
+-- Resolve a safe marker position near a site (for physical marker nodes)
+-- Similar to observer_pos but prefers ground-level placement
+function aliveworld.sites.resolve_marker_pos(site)
+  if not site then return nil end
+  -- Use anchor_pos if available (marker should be at the exact spot)
+  if site.anchor_pos then
+    local safe = aliveworld.sites.is_safe_standing_pos(site.anchor_pos)
+    if safe.safe then
+      return site.anchor_pos
+    end
+    -- Try one block above
+    local above = {x = site.anchor_pos.x, y = site.anchor_pos.y + 1, z = site.anchor_pos.z}
+    safe = aliveworld.sites.is_safe_standing_pos(above)
+    if safe.safe then
+      return above
+    end
+  end
+
+  -- Fall back to arrival_pos
+  local arrival = aliveworld.sites.resolve_arrival_pos(site)
+  if arrival then
+    local safe = aliveworld.sites.is_safe_standing_pos(arrival)
+    if safe.safe then
+      return arrival
+    end
+  end
+
+  -- Final fallback
+  return site.anchor_pos or site.pos
 end
 
 function aliveworld.sites.create_event_site(event)
@@ -330,6 +552,16 @@ function aliveworld.sites.expire_old(world_time)
   return expired_count
 end
 
+-- Get the display position for a site (prefer arrival_pos, then anchor_pos, then pos)
+function aliveworld.sites.get_display_pos(site)
+  if not site then return nil end
+  if aliveworld.sites.resolve_arrival_pos then
+    local arrival = aliveworld.sites.resolve_arrival_pos(site)
+    if arrival then return arrival end
+  end
+  return site.anchor_pos or site.pos
+end
+
 function aliveworld.sites.get_places_for_player(player_name)
   if not player_name then return {} end
   local player = minetest.get_player_by_name(player_name)
@@ -340,8 +572,9 @@ function aliveworld.sites.get_places_for_player(player_name)
   local places = {}
     for _, s in pairs(sites) do
       if s.type == "settlement" and s.status == "active" then
-        local dist = aliveworld.sites.distance(from_pos, s.pos)
-        local dir = aliveworld.sites.direction_name_ru(from_pos, s.pos)
+        local to_pos = aliveworld.sites.get_display_pos(s)
+        local dist = aliveworld.sites.distance(from_pos, to_pos)
+        local dir = aliveworld.sites.direction_name_ru(from_pos, to_pos)
         local type_name = (s.subtype == "village" and "деревня") or (s.subtype == "outpost" and "форпост") or s.subtype
         local physical_label = "не отмечено"
         if s.physical_status == "anchored" or s.physical_status == "materialized" then
@@ -373,8 +606,9 @@ function aliveworld.sites.get_place_details(player_name, site_id)
     return {site = site, dist = nil, dir = nil}
   end
   local from_pos = {x = player_pos.x, y = player_pos.y, z = player_pos.z}
-  local dist = aliveworld.sites.distance(from_pos, site.pos)
-  local dir = aliveworld.sites.direction_name_ru(from_pos, site.pos)
+  local to_pos = aliveworld.sites.get_display_pos(site)
+  local dist = aliveworld.sites.distance(from_pos, to_pos)
+  local dir = aliveworld.sites.direction_name_ru(from_pos, to_pos)
   return {
     site = site,
     dist = dist,
@@ -393,8 +627,9 @@ function aliveworld.sites.get_near_for_player(player_name, limit)
   local near = aliveworld.sites.nearest(from_pos, limit)
   local result = {}
   for _, s in ipairs(near) do
-    local dist = aliveworld.sites.distance(from_pos, s.pos)
-    local dir = aliveworld.sites.direction_name_ru(from_pos, s.pos)
+    local to_pos = aliveworld.sites.get_display_pos(s)
+    local dist = aliveworld.sites.distance(from_pos, to_pos)
+    local dir = aliveworld.sites.direction_name_ru(from_pos, to_pos)
     local type_label = ""
     if s.type == "settlement" then
       type_label = (s.subtype == "village" and "деревня") or (s.subtype == "outpost" and "форпост") or s.subtype

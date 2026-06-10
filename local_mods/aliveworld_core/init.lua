@@ -1022,6 +1022,79 @@ minetest.register_chatcommand("aw_whereami", {
   end,
 })
 
+minetest.register_chatcommand("aw_site_nav_debug", {
+  params = "<site_id>",
+  description = "Show navigation positions for a site (arrival, observer, marker)",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_site_nav_debug <site_id>"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local site = aliveworld.sites.get(param)
+    if not site then
+      return false, "Site not found: " .. param
+    end
+    local lines = {}
+    table.insert(lines, string.format("Site: %s (%s)", site.id, site.name_en or site.name))
+    table.insert(lines, string.format("Type: %s (%s)", site.type, site.subtype))
+    table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
+    table.insert(lines, "")
+
+    -- Anchor pos
+    if site.anchor_pos then
+      local safe = aliveworld.sites.is_safe_standing_pos(site.anchor_pos)
+      table.insert(lines, string.format("Anchor pos: (%d,%d,%d) safe=%s reason=%s",
+        site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z,
+        tostring(safe.safe), table.concat(safe.reasons, ",")))
+    else
+      table.insert(lines, "Anchor pos: none")
+    end
+
+    -- Arrival pos
+    local arrival = aliveworld.sites.resolve_arrival_pos(site)
+    if arrival then
+      local safe = aliveworld.sites.is_safe_standing_pos(arrival)
+      table.insert(lines, string.format("Arrival pos: (%d,%d,%d) safe=%s reason=%s",
+        arrival.x, arrival.y, arrival.z,
+        tostring(safe.safe), table.concat(safe.reasons, ",")))
+    else
+      table.insert(lines, "Arrival pos: none (resolution failed)")
+    end
+
+    -- Observer pos
+    local observer = aliveworld.sites.resolve_observer_pos(site)
+    if observer then
+      local safe = aliveworld.sites.is_safe_standing_pos(observer)
+      table.insert(lines, string.format("Observer pos: (%d,%d,%d) safe=%s reason=%s",
+        observer.x, observer.y, observer.z,
+        tostring(safe.safe), table.concat(safe.reasons, ",")))
+    else
+      table.insert(lines, "Observer pos: none (resolution failed)")
+    end
+
+    -- Marker pos
+    local marker = aliveworld.sites.resolve_marker_pos(site)
+    if marker then
+      local safe = aliveworld.sites.is_safe_standing_pos(marker)
+      table.insert(lines, string.format("Marker pos: (%d,%d,%d) safe=%s reason=%s",
+        marker.x, marker.y, marker.z,
+        tostring(safe.safe), table.concat(safe.reasons, ",")))
+    else
+      table.insert(lines, "Marker pos: none (resolution failed)")
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, string.format("Raw site.pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+    if site.radius then
+      table.insert(lines, string.format("Site radius: %d", site.radius))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
 minetest.register_chatcommand("aw_compass", {
   params = "<player_name> <site_id>",
   description = "Show direction and distance from player to site",
