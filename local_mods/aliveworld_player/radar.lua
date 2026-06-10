@@ -9,13 +9,18 @@ local radar_state = {}  -- player_name -> {enabled, hud_ids = {bg, player, pt[1.
 
 local DEFAULT_RADIUS = 512
 local DISPLAY_RADIUS = 70  -- px from center
-local DEFAULT_ORIGIN = {x = 10, y = 10}
+local RADAR_SIZE = 160     -- bg image width/height in px
 
--- Preset origins (relative to pos {1,0} i.e. top-left corner)
+-- All HUD elements use position={0,0} (top-left anchor).
+-- Origin is the top-left corner of the radar frame on screen.
+local DEFAULT_ORIGIN = {x = 0, y = 0}
+
+-- Preset origins (top-left anchor, pixel offsets from screen top-left)
 local PRESETS = {
+  ["right-below-map"] = {x = 10, y = 10},
   ["top-left"] = {x = 10, y = 10},
-  ["top-right"] = {x = -170, y = 10},
-  ["bottom-right"] = {x = -170, y = -170},
+  ["middle-left"] = {x = 10, y = 200},
+  ["bottom-left"] = {x = 10, y = 400},
   ["off"] = nil,
 }
 local MAX_POINTS = 8
@@ -129,20 +134,20 @@ end
 
 local function create_radar_huds(player, state)
   local huds = {}
-  local pname = player:get_player_name()
+  local cx, cy = get_radar_offset(state.origin)
 
-  -- Background
+  -- Background (z-index lower so points render on top)
   huds.bg = player:hud_add({
     hud_elem_type = "image",
-    position = {x = 1, y = 0},
+    position = {x = 0, y = 0},
     offset = state.origin,
     text = "aliveworld_radar_bg.png",
     scale = {x = 1, y = 1},
     alignment = {x = 0, y = 0},
+    z_index = -1,
   })
 
   -- Player dot at center
-  local cx, cy = get_radar_offset(state.origin)
   huds.player = player:hud_add({
     hud_elem_type = "image",
     position = {x = 0, y = 0},
@@ -150,6 +155,7 @@ local function create_radar_huds(player, state)
     text = TEXTURES.player,
     scale = {x = 1, y = 1},
     alignment = {x = 0.5, y = 0.5},
+    z_index = 0,
   })
 
   -- Pre-allocate 8 point slots, all hidden (scale = 0)
@@ -162,6 +168,7 @@ local function create_radar_huds(player, state)
       text = TEXTURES.unknown,
       scale = {x = 0, y = 0},
       alignment = {x = 0.5, y = 0.5},
+      z_index = 1,
     })
   end
 
@@ -262,12 +269,11 @@ function aliveworld_player.radar.set_origin_preset(player_name, preset_name)
   preset_name = (preset_name or ""):lower()
   local origin = PRESETS[preset_name]
   if preset_name == "off" then
-    -- Disable radar and store no origin
     aliveworld_player.radar.disable(player_name)
     return true, "Radar выключен."
   end
   if not origin then
-    return false, "Неизвестный preset. Доступны: top-left, top-right, bottom-right, off"
+    return false, "Неизвестный preset. Доступны: right-below-map, top-left, middle-left, bottom-left, off"
   end
   if not radar_state[player_name] then
     radar_state[player_name] = {enabled = false, origin = {x = origin.x, y = origin.y}, radius = DEFAULT_RADIUS}
@@ -278,6 +284,20 @@ function aliveworld_player.radar.set_origin_preset(player_name, preset_name)
     aliveworld_player.radar.refresh_player(player)
   end
   return true, "Позиция радара изменена: " .. preset_name
+end
+
+function aliveworld_player.radar.set_origin_offset(player_name, dx, dy)
+  dx = tonumber(dx) or 0
+  dy = tonumber(dy) or 0
+  if not radar_state[player_name] then
+    radar_state[player_name] = {enabled = false, origin = {x = 0, y = 0}, radius = DEFAULT_RADIUS}
+  end
+  radar_state[player_name].origin = {x = dx, y = dy}
+  local player = minetest.get_player_by_name(player_name)
+  if player then
+    aliveworld_player.radar.refresh_player(player)
+  end
+  return true, "Позиция радара: (" .. dx .. ", " .. dy .. ")"
 end
 
 function aliveworld_player.radar.clear_hud(player_name)

@@ -968,9 +968,10 @@ minetest.register_chatcommand("aw_gps", {
       local origin = aliveworld_player.radar.get_origin_for_player(player_name)
       -- Guess preset name from origin
       local preset_name = "custom"
-      if origin.x == 10 and origin.y == 10 then preset_name = "top-left"
-      elseif origin.x == -170 and origin.y == 10 then preset_name = "top-right"
-      elseif origin.x == -170 and origin.y == -170 then preset_name = "bottom-right" end
+      if origin.x == 10 and origin.y == 10 then preset_name = "right-below-map"
+      elseif origin.x == 10 and origin.y == 200 then preset_name = "middle-left"
+      elseif origin.x == 10 and origin.y == 400 then preset_name = "bottom-left"
+      elseif origin.y == 10 and origin.x == 10 then preset_name = "top-left" end
       local lines = {
         string.format("Player: %s", player_name),
         string.format("GPS enabled: %s", enabled and "да" or "нет"),
@@ -1022,12 +1023,12 @@ minetest.register_chatcommand("aw_gps", {
 })
 
 minetest.register_chatcommand("aw_gps_pos", {
-  params = "<top-left|top-right|bottom-right|off>",
+  params = "<right-below-map|top-left|middle-left|bottom-left|off>",
   description = "Изменить позицию радара на экране",
   privs = {interact = true},
   func = function(player_name, param)
     if not param or param == "" then
-      return false, "Укажите preset: top-left, top-right, bottom-right, off"
+      return false, "Укажите preset: right-below-map, top-left, middle-left, bottom-left, off"
     end
     if not aliveworld_player.radar then
       return false, "Radar module not loaded."
@@ -1036,6 +1037,25 @@ minetest.register_chatcommand("aw_gps_pos", {
       return false, "set_origin_preset not available."
     end
     return aliveworld_player.radar.set_origin_preset(player_name, param)
+  end,
+})
+
+minetest.register_chatcommand("aw_gps_offset", {
+  params = "<x> <y>",
+  description = "Установить точное смещение радара в пикселях",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not param or param == "" then
+      return false, "Укажите x y в пикселях. Пример: /aw_gps_offset 10 200"
+    end
+    local dx, dy = param:match("^(%-?%d+)%s+(%-?%d+)$")
+    if not dx or not dy then
+      return false, "Укажите два числа: x y. Пример: /aw_gps_offset 10 200"
+    end
+    if not aliveworld_player.radar then
+      return false, "Radar module not loaded."
+    end
+    return aliveworld_player.radar.set_origin_offset(player_name, dx, dy)
   end,
 })
 
@@ -1170,6 +1190,107 @@ minetest.register_chatcommand("aw_gps_debug", {
       end
     end
     return true, table.concat(lines, "\n")
+  end,
+})
+
+-- Radar HUD debug: dump all HUD element properties
+minetest.register_chatcommand("aw_gps_hud_debug", {
+  params = "",
+  description = "Debug: show all radar HUD element properties",
+  privs = {interact = true},
+  func = function(player_name)
+    local player = minetest.get_player_by_name(player_name)
+    if not player then return false, "Player not found." end
+    local radar_debug = aliveworld_player.radar and aliveworld_player.radar.get_debug_info and aliveworld_player.radar.get_debug_info(player_name)
+    if not radar_debug then return false, "Radar debug info not available." end
+    local lines = {"=== Radar HUD Debug ==="}
+    table.insert(lines, string.format("Enabled: %s", tostring(radar_debug.enabled)))
+    table.insert(lines, string.format("Radius: %d", radar_debug.radius or "?"))
+    table.insert(lines, string.format("Origin: (%d,%d)", radar_debug.origin.x, radar_debug.origin.y))
+    table.insert(lines, "")
+    if radar_debug.hud_ids then
+      local all_ids = {}
+      if radar_debug.hud_ids.bg then table.insert(all_ids, {id=radar_debug.hud_ids.bg, name="bg"}) end
+      if radar_debug.hud_ids.player then table.insert(all_ids, {id=radar_debug.hud_ids.player, name="player"}) end
+      if radar_debug.hud_ids.pts then
+        for i, id in ipairs(radar_debug.hud_ids.pts) do
+          table.insert(all_ids, {id=id, name="pt["..i.."]"})
+        end
+      end
+      for _, entry in ipairs(all_ids) do
+        local prop = player:hud_get(entry.id)
+        if prop then
+          table.insert(lines, string.format("[%s] id=%s type=%s pos=(%.2f,%.2f) off=(%d,%d) scale=(%.2f,%.2f) align=(%.2f,%.2f) z=%s text=%s",
+            entry.name, tostring(entry.id), tostring(prop.type or "?"),
+            prop.position and prop.position.x or 0, prop.position and prop.position.y or 0,
+            prop.offset and prop.offset.x or 0, prop.offset and prop.offset.y or 0,
+            prop.scale and prop.scale.x or 0, prop.scale and prop.scale.y or 0,
+            prop.alignment and prop.alignment.x or 0, prop.alignment and prop.alignment.y or 0,
+            tostring(prop.z_index or 0), tostring(prop.text or "")))
+        else
+          table.insert(lines, string.format("[%s] id=%s ERROR: hud_get returned nil", entry.name, tostring(entry.id)))
+        end
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+-- Temporary test pattern for radar rendering
+local test_pattern_active = {}
+
+minetest.register_chatcommand("aw_gps_testpattern", {
+  params = "on|off",
+  description = "Show/hide radar test pattern (center + cardinal points)",
+  privs = {interact = true},
+  func = function(player_name, param)
+    param = (param or ""):lower()
+    local player = minetest.get_player_by_name(player_name)
+    if not player then return false, "Player not found." end
+    if param == "on" then
+      if test_pattern_active[player_name] then
+        return true, "Test pattern уже включён."
+      end
+      test_pattern_active[player_name] = {huds = {}}
+      local state = aliveworld_player.radar and aliveworld_player.radar.get_debug_info and aliveworld_player.radar.get_debug_info(player_name)
+      local ox, oy
+      if state and state.origin then
+        ox, oy = state.origin.x + 80, state.origin.y + 80
+      else
+        ox, oy = 90, 90
+      end
+      local pattern_points = {
+        {name="CENTER", ox=0, oy=0, color=0xFFFFFF},
+        {name="NORTH", ox=0, oy=-65, color=0xFF0000},
+        {name="EAST", ox=65, oy=0, color=0x00FF00},
+        {name="SOUTH", ox=0, oy=65, color=0x0000FF},
+        {name="WEST", ox=-65, oy=0, color=0xFFFF00},
+      }
+      for _, pt in ipairs(pattern_points) do
+        local id = player:hud_add({
+          hud_elem_type = "image",
+          position = {x = 0, y = 0},
+          offset = {x = ox + pt.ox, y = oy + pt.oy},
+          text = "aliveworld_radar_target.png",
+          scale = {x = 1, y = 1},
+          alignment = {x = 0.5, y = 0.5},
+          z_index = 10,
+        })
+        table.insert(test_pattern_active[player_name].huds, id)
+      end
+      return true, "Test pattern включён. Видны маркеры: центр (белый), N(красный), E(зелёный), S(синий), W(жёлтый)."
+    elseif param == "off" then
+      local t = test_pattern_active[player_name]
+      if t and t.huds then
+        for _, id in ipairs(t.huds) do
+          player:hud_remove(id)
+        end
+      end
+      test_pattern_active[player_name] = nil
+      return true, "Test pattern выключен."
+    else
+      return false, "Укажите on или off."
+    end
   end,
 })
 
