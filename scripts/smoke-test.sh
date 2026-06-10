@@ -369,6 +369,31 @@ if ! grep -q "aw_compass" "$ROOT/local_mods/aliveworld_core/init.lua"; then
   exit 1
 fi
 
+# Direction logic test (matching Z-axis convention: -z=north, +z=south)
+echo -n "  direction logic: "
+python3 -c "
+import math, sys
+DIR = ['north','north-east','east','south-east','south','south-west','west','north-west']
+def dir_idx(fx, fz, tx, tz):
+    dx = tx - fx; dz = tz - fz
+    angle = math.degrees(math.atan2(-dz, dx))
+    bearing = (90 - angle) % 360
+    return int((bearing + 22.5) // 45) % 8
+tests = [
+    ((0,0),(100,0),'east'), ((0,0),(-100,0),'west'),
+    ((0,0),(0,-100),'north'), ((0,0),(0,100),'south'),
+    ((0,0),(100,-100),'north-east'), ((0,0),(100,100),'south-east'),
+    ((0,0),(-100,-100),'north-west'), ((0,0),(-100,100),'south-west'),
+    ((245,-145),(320,-180),'north-east'),
+]
+for (fx,fz),(tx,tz),exp in tests:
+    got = DIR[dir_idx(fx,fz,tx,tz)]
+    if got != exp:
+        print(f'FAIL: ({fx},{fz})->({tx},{tz}) expected {exp}, got {got}')
+        sys.exit(1)
+print('PASS')
+" || exit 1
+
 # Materialization checks
 if ! grep -q "materialize_site" "$ROOT/local_mods/aliveworld_world/init.lua"; then
   echo "aliveworld_world must have materialize_site command"
