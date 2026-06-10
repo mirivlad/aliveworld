@@ -151,7 +151,12 @@ function aliveworld_player.show_news(player_name, player_pos)
         if #display_text > 60 then
           display_text = display_text:sub(1, 58) .. ".."
         end
-        table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("• " .. display_text), "]")
+        local rumor_status = ""
+        if aliveworld.rumors and aliveworld.rumors.get_player_status then
+          rumor_status = aliveworld.rumors.get_player_status(player_name, r.id)
+        end
+        local status_label = (aliveworld.rumors and aliveworld.rumors.get_status_label and aliveworld.rumors.get_status_label(rumor_status)) or ""
+        table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("• " .. display_text .. " " .. status_label), "]")
         y = y + 0.4
         table.insert(formspec, "label[0.4," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("  Истекает на день " .. r.expires_day), "]")
         if site_id then
@@ -225,20 +230,16 @@ function aliveworld_player.show_rumor_detail(player_name, rumor_id)
     end
   end
 
-  -- Check current tracking status
-  local is_tracking = false
-  local track_status = "неизвестно"
-  if aliveworld.tracking then
-    local track = aliveworld.tracking.get_active_track(player_name)
-    if track and site_id and track.site_id == site_id then
-      is_tracking = true
-      track_status = "отслеживается"
-      if track.has_arrived then
-        track_status = "посещено"
-      end
-    end
+  -- Check player rumor status
+  local rumor_player_status = ""
+  if aliveworld.rumors and aliveworld.rumors.get_player_status then
+    rumor_player_status = aliveworld.rumors.get_player_status(player_name, rumor_id)
   end
-  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Статус: " .. track_status), "]")
+  local rumor_status_label = rumor_player_status
+  if aliveworld.rumors and aliveworld.rumors.get_status_label then
+    rumor_status_label = aliveworld.rumors.get_status_label(rumor_player_status)
+  end
+  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";", minetest.formspec_escape("Статус: " .. rumor_status_label), "]")
   y = y + 0.6
 
   -- Actions

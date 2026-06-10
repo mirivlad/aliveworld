@@ -275,6 +275,11 @@ function aliveworld.tracking.check_arrival(player)
     {player = pname, site_id = track.site_id, kind = kind, dist = dist}
   )
 
+  -- Sync rumor status to visited
+  if aliveworld.rumors and aliveworld.rumors.sync_status_from_tracking then
+    aliveworld.rumors.sync_status_from_tracking(pname)
+  end
+
   return {
     arrived = true,
     site = track.site,
