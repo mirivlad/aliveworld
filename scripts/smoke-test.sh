@@ -421,6 +421,83 @@ if ! grep -q "aw_investigate" "$ROOT/local_mods/aliveworld_player/init.lua"; the
   exit 1
 fi
 
+# GPS/Tracking checks
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/tracking.lua" ]; then
+  echo "aliveworld_player must have tracking.lua"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/radar.lua" ]; then
+  echo "aliveworld_player must have radar.lua"
+  exit 1
+fi
+
+if ! grep -q "aliveworld_player.tracking" "$ROOT/local_mods/aliveworld_player/tracking.lua"; then
+  echo "tracking.lua must set up aliveworld_player.tracking"
+  exit 1
+fi
+
+if ! grep -q "aliveworld_player.radar" "$ROOT/local_mods/aliveworld_player/radar.lua"; then
+  echo "radar.lua must set up aliveworld_player.radar"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("aw_track"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_track command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("aw_track_event"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_track_event command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("aw_untrack"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_untrack command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("aw_tracks"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_tracks command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("aw_gps"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register /aw_gps command"
+  exit 1
+fi
+
+if ! grep -q 'register_craftitem("aliveworld_player:gps"' "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must register aliveworld_player:gps item"
+  exit 1
+fi
+
+if ! grep -q 'hud_elem_type = "waypoint"' "$ROOT/local_mods/aliveworld_player/tracking.lua"; then
+  echo "tracking.lua must use hud_elem_type waypoint"
+  exit 1
+fi
+
+if ! grep -q "aliveworld_gps.png" "$ROOT/local_mods/aliveworld_player/init.lua"; then
+  echo "aliveworld_player must reference aliveworld_gps.png"
+  exit 1
+fi
+
+if ! grep -q "aliveworld_radar_bg.png" "$ROOT/local_mods/aliveworld_player/radar.lua"; then
+  echo "radar.lua must reference aliveworld_radar_bg.png"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_gps.png" ]; then
+  echo "aliveworld_player must have aliveworld_gps.png texture"
+  exit 1
+fi
+
+if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_radar_bg.png" ]; then
+  echo "aliveworld_player must have aliveworld_radar_bg.png texture"
+  exit 1
+fi
+
 # README checks
 if ! grep -q "/aw_site_debug" "$ROOT/README.md"; then
   echo "README.md must mention /aw_site_debug"
@@ -434,6 +511,16 @@ fi
 
 if ! grep -q "/aw_investigate" "$ROOT/README.md"; then
   echo "README.md must mention /aw_investigate"
+  exit 1
+fi
+
+if ! grep -q "AliveWorld GPS" "$ROOT/README.md"; then
+  echo "README.md must mention AliveWorld GPS"
+  exit 1
+fi
+
+if ! grep -q "/aw_track " "$ROOT/README.md"; then
+  echo "README.md must mention /aw_track"
   exit 1
 fi
 

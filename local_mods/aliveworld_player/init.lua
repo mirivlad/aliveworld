@@ -3,6 +3,9 @@
 
 aliveworld_player = {}
 
+dofile(minetest.get_modpath("aliveworld_player") .. "/tracking.lua")
+dofile(minetest.get_modpath("aliveworld_player") .. "/radar.lua")
+
 -- Module availability checks
 
 local function has_rumors()
@@ -132,6 +135,12 @@ function aliveworld_player.show_news(player_name, player_pos)
         end
         table.insert(lines, string.format("• %s", text))
         table.insert(lines, string.format("  Истекает на день %d", r.expires_day))
+        if has_sites() and r.event_id then
+          local site = aliveworld.sites.find_by_event(r.event_id)
+          if site then
+            table.insert(lines, string.format("  Отследить: /aw_track %s", site.id))
+          end
+        end
         table.insert(lines, "")
       end
     end
@@ -277,6 +286,7 @@ function aliveworld_player.show_places(player_name)
       else
         table.insert(lines, string.format("  Известно только по слухам, место ещё не отмечено"))
       end
+      table.insert(lines, string.format("  /aw_track %s — отследить", p.id))
       table.insert(lines, "")
     end
   end
@@ -339,6 +349,9 @@ function aliveworld_player.show_place_detail(player_name, site_id)
     end
   end
 
+  table.insert(lines, "")
+  table.insert(lines, string.format("Команда: /aw_track %s", site_id))
+
   show_formspec(player_name, "aliveworld_player:place", "Место", table.concat(lines, "\n"))
 end
 
@@ -366,6 +379,7 @@ function aliveworld_player.show_near(player_name)
       else
         table.insert(lines, string.format("  %s, %d блоков — не отмечено", n.dir, n.dist))
       end
+      table.insert(lines, string.format("  Отследить: /aw_track %s", n.id))
       table.insert(lines, "")
     end
   end
@@ -480,6 +494,8 @@ minetest.register_chatcommand("aw_help", {
   func = function()
     local lines = {}
     table.insert(lines, "=== Команды игрока AliveWorld ===")
+    table.insert(lines, "")
+    table.insert(lines, "--- Информация ---")
     table.insert(lines, "/aw_news — показать активные слухи")
     table.insert(lines, "/aw_world — показать состояние мира")
     table.insert(lines, "/aw_chronicle_read — прочитать летопись")
@@ -487,9 +503,22 @@ minetest.register_chatcommand("aw_help", {
     table.insert(lines, "/aw_place <id> — подробно о месте")
     table.insert(lines, "/aw_near — ближайшие места")
     table.insert(lines, "/aw_investigate — поиск следов событий рядом")
+    table.insert(lines, "")
+    table.insert(lines, "--- Навигация (GPS) ---")
+    table.insert(lines, "/aw_track <site_id> — установить waypoint на место")
+    table.insert(lines, "/aw_track_event <event_id> — установить waypoint на событие")
+    table.insert(lines, "/aw_track_near [радиус] — отследить ближайшее место")
+    table.insert(lines, "/aw_untrack — убрать waypoint")
+    table.insert(lines, "/aw_tracks — показать текущий waypoint")
+    table.insert(lines, "/aw_gps — вкл/выкл радар (или предмет GPS)")
+    table.insert(lines, "/aw_gps_radius <64-2000> — радиус радара в блоках")
+    table.insert(lines, "/aw_gps_near — показать ближайшие точки радара")
+    table.insert(lines, "")
+    table.insert(lines, "--- Прочее ---")
     table.insert(lines, "/aw_help — эта справка")
     table.insert(lines, "")
     table.insert(lines, "Установите Доску слухов в мире для быстрого доступа к новостям.")
+    table.insert(lines, "Предмет GPS: /giveme aliveworld_player:gps")
     return true, table.concat(lines, "\n")
   end,
 })
@@ -585,5 +614,210 @@ minetest.register_node("aliveworld_player:rumor_board", {
     return itemstack
   end,
 })
+
+-- GPS Item
+
+minetest.register_craftitem("aliveworld_player:gps", {
+  description = "AliveWorld GPS",
+  inventory_image = "aliveworld_gps.png",
+  wield_image = "aliveworld_gps.png",
+  stack_max = 1,
+  groups = {not_in_creative_inventory = 0},
+  on_use = function(itemstack, user, pointed_thing)
+    if not user or not user:is_player() then return end
+    local pname = user:get_player_name()
+    aliveworld_player.radar.toggle(pname)
+    return itemstack
+  end,
+})
+
+-- Tracking commands
+
+minetest.register_chatcommand("aw_track", {
+  params = "<site_id>",
+  description = "Установить waypoint на место",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not param or param == "" then
+      return false, "Укажите id места. /aw_places — список."
+    end
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    return aliveworld_player.tracking.track_site(player_name, param)
+  end,
+})
+
+minetest.register_chatcommand("aw_track_event", {
+  params = "<event_id>",
+  description = "Установить waypoint на событие",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not param or param == "" then
+      return false, "Укажите id события. /aw_events — список."
+    end
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    return aliveworld_player.tracking.track_event(player_name, param)
+  end,
+})
+
+minetest.register_chatcommand("aw_track_near", {
+  params = "[radius]",
+  description = "Отследить ближайшее место или событие",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    local radius = tonumber(param) or 1000
+    return aliveworld_player.tracking.track_near(player_name, radius)
+  end,
+})
+
+minetest.register_chatcommand("aw_untrack", {
+  params = "[all|<site_id>]",
+  description = "Убрать waypoint",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    return aliveworld_player.tracking.untrack(player_name, (param or ""):lower())
+  end,
+})
+
+minetest.register_chatcommand("aw_tracks", {
+  params = "",
+  description = "Показать текущий waypoint",
+  privs = {interact = true},
+  func = function(player_name)
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    local list = aliveworld_player.tracking.list(player_name)
+    if #list == 0 then
+      return true, "Нет активных waypoint."
+    end
+    local t = list[1]
+    local lines = {"=== Текущий waypoint ==="}
+    if t.site then
+      table.insert(lines, string.format("Место: %s (%s)", t.site.name or t.site_id, t.site_id))
+      if t.precision == "approximate" then
+        table.insert(lines, "Точность: примерная (известно по слухам)")
+      else
+        table.insert(lines, "Точность: точная (место отмечено)")
+      end
+    else
+      table.insert(lines, string.format("Site ID: %s", t.site_id))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_track_debug", {
+  params = "<player_name>",
+  description = "Admin debug: show tracking state for player",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_track_debug <player_name>"
+    end
+    if not aliveworld_player.tracking then
+      return false, "Tracking module not loaded."
+    end
+    local list = aliveworld_player.tracking.list(param)
+    if #list == 0 then
+      return false, "No active track for " .. param
+    end
+    local t = list[1]
+    local site = t.site
+    local lines = {}
+    table.insert(lines, string.format("Player: %s", param))
+    table.insert(lines, string.format("Tracked site: %s", t.site_id))
+    table.insert(lines, string.format("HUD ID: %s", tostring(t.hud_id)))
+    table.insert(lines, string.format("Precision: %s", t.precision))
+    if site then
+      table.insert(lines, string.format("Site name: %s", site.name_en or site.name))
+      table.insert(lines, string.format("Site pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+      table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
+      if site.anchor_pos then
+        table.insert(lines, string.format("Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
+      end
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+-- GPS Radar commands
+
+minetest.register_chatcommand("aw_gps", {
+  params = "[on|off|status]",
+  description = "AliveWorld Radar HUD",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not aliveworld_player.radar then
+      return false, "Radar module not loaded."
+    end
+    param = (param or ""):lower()
+    if param == "on" then
+      return aliveworld_player.radar.enable(player_name)
+    elseif param == "off" then
+      return aliveworld_player.radar.disable(player_name)
+    elseif param == "status" then
+      local enabled = aliveworld_player.radar.is_enabled(player_name)
+      local radius = aliveworld_player.radar.get_radius(player_name)
+      return true, string.format("AliveWorld Radar: %s. Радиус: %d блоков.", enabled and "включён" or "выключен", radius)
+    else
+      return aliveworld_player.radar.toggle(player_name)
+    end
+  end,
+})
+
+minetest.register_chatcommand("aw_gps_radius", {
+  params = "<64-2000>",
+  description = "Изменить радиус радара в блоках",
+  privs = {interact = true},
+  func = function(player_name, param)
+    if not param or param == "" then
+      return false, "Укажите радиус в блоках (64-2000). Текущий: " .. aliveworld_player.radar.get_radius(player_name)
+    end
+    if not aliveworld_player.radar then
+      return false, "Radar module not loaded."
+    end
+    return aliveworld_player.radar.set_radius(player_name, param)
+  end,
+})
+
+minetest.register_chatcommand("aw_gps_near", {
+  params = "",
+  description = "Показать ближайшие точки радара",
+  privs = {interact = true},
+  func = function(player_name)
+    if not aliveworld_player.radar then
+      return false, "Radar module not loaded."
+    end
+    local points = aliveworld_player.radar.get_points_for_player(player_name)
+    if #points == 0 then
+      return true, "Радар не видит точек поблизости."
+    end
+    local lines = {"=== Ближайшие точки радара ==="}
+    for _, s in ipairs(points) do
+      local name = s.name_en or s.name or s.id
+      local type_label = s.type == "settlement" and "поселение" or "событие"
+      table.insert(lines, string.format("  %s (%s) — %s", name, s.id, type_label))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+-- Restore waypoint on join
+
+minetest.register_on_joinplayer(function(player)
+  if aliveworld_player.tracking and aliveworld_player.tracking.refresh_player then
+    aliveworld_player.tracking.refresh_player(player)
+  end
+end)
 
 minetest.log("action", "[aliveworld_player] loaded")

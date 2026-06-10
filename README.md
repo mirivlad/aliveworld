@@ -127,6 +127,38 @@ Admin commands (`aliveworld_world`):
 /aw_near               # nearest active sites from player position
 /aw_investigate        # search for event traces nearby
 /aw_help               # command help
+
+### AliveWorld GPS — Waypoints & Radar HUD
+
+Server-side navigation system. No client-side mods required.
+
+**Waypoints:**
+- `/aw_track <site_id>` — set a waypoint beacon to a site/event
+- `/aw_track_event <event_id>` — set waypoint to an event
+- `/aw_track_near [radius]` — track the nearest meaningful site (default 1000)
+- `/aw_untrack` — remove current waypoint
+- `/aw_tracks` — show current waypoint info
+
+Waypoints use `hud_elem_type = "waypoint"` (3D beacon in the world).
+Abstract sites (known only by rumor) are approximate. Anchored/materialized sites are exact.
+
+**Radar HUD:**
+- `/aw_gps [on|off|status]` — toggle AliveWorld radar (north-up, top-right)
+- `/aw_gps_radius <64-2000>` — change radar range in blocks (default 512)
+- `/aw_gps_near` — list points currently visible on the radar
+
+The radar shows up to 8 closest priority points:
+1. Tracked target (yellow diamond)
+2. Anchored event sites (blue/green dots)
+3. Anchored settlements (green dots)
+4. Abstract event sites
+
+Points outside the radar radius appear as edge arrows.
+
+**GPS item:** `/giveme aliveworld_player:gps`
+Right-click toggles the radar HUD on/off.
+
+**Tracking hints** appear in `/aw_places`, `/aw_place`, and rumor news formspecs.
 ```
 
 > **ASCII output**: Server-console commands intentionally use ASCII/English because the ncurses terminal inside Docker may render Cyrillic incorrectly. Russian text (`label_ru`) is preserved in bridge profiles and chronicle event `data` for the future in-game UI layer.
