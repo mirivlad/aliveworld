@@ -4,6 +4,8 @@
 
 Сервер собирается из исходников в собственный Docker-образ с ncurses и `--terminal` для интерактивной консоли.
 
+**Рекомендуемый текстурпак:** [Hand Painted Pack Expanded](https://content.luanti.org/packages/shaft/hand_painted_expanded/) (shaft, 128×128, CC0). Клиенты увидят предложение скачать его при подключении к серверу.
+
 ---
 
 ## Требования
@@ -201,10 +203,14 @@ luanti-aliveworld/
   local_mods/               # наши моды (под git)
     aliveworld_core/        # ядро симуляции
       init.lua
-      settlements.lua       # модель и симуляция поселений
-    aliveworld_bridge_mcl/  # мост к Mineclonia
+      settlements.lua       # модель симуляции поселений
+      world_events.lua      # генерация мировых событий
+      rumors.lua            # слой слухов для игроков
+      sites.lua             # пространственная привязка (координаты, расстояния)
+    aliveworld_bridge_mcl/  # мост к Mineclonia (сезоны, еда, дерево, опасность)
     aliveworld_admin/       # админ-инструменты (/aw_status, /aw_bridge)
-    aliveworld_player/      # player UI (rumors, world state, chronicle, Rumor Board node)
+    aliveworld_player/      # player UI (слухи, мир, хроника, Rumor Board node)
+    aliveworld_world/       # физические маркеры и материализация объектов в мире
 
   scripts/
     build-image.sh          # сборка Docker-образа

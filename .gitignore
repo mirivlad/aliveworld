@@ -1,4 +1,9 @@
-data/
+data/*
+!data/worlds/
+data/worlds/*
+!data/worlds/aliveworld/
+data/worlds/aliveworld/*
+!data/worlds/aliveworld/world.mt
 backups/
 locks/
 *.log
