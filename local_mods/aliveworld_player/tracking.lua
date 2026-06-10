@@ -66,11 +66,12 @@ local function add_hud(player_name, site, target_pos)
   return true, precision
 end
 
-function aliveworld_player.tracking.track_site(player_name, site_id)
+function aliveworld_player.tracking.track_site(player_name, site_id, opts)
+  opts = opts or {}
   if not aliveworld.tracking then
     return false, "Tracking module not loaded"
   end
-  local result = aliveworld.tracking.track_site(player_name, site_id, {source = "player_command"})
+  local result = aliveworld.tracking.track_site(player_name, site_id, {source = opts.source or "player_command"})
   if not result.ok then
     local err_map = {
       player_not_found = "Игрок не найден",

@@ -175,18 +175,17 @@ minetest.register_on_player_receive_fields(function(player, formname, fields)
     if field:sub(1, #prefix) == prefix then
       local site_id = field:sub(#prefix + 1)
       if site_id and site_id ~= "" and aliveworld_player.tracking then
-        local ok, msg = aliveworld_player.tracking.track_site(pname, site_id)
+        local ok, msg = aliveworld_player.tracking.track_site(pname, site_id, {source = "rumor_board"})
         if ok then
           minetest.chat_send_player(pname, "Waypoint установлен: " .. site_id)
           -- Auto-enable GPS
           if aliveworld_player.radar and aliveworld_player.radar.enable then
-            local _, gps_msg = aliveworld_player.radar.enable(pname)
+            aliveworld_player.radar.enable(pname)
             minetest.chat_send_player(pname, "AliveWorld GPS включён.")
           end
         else
           minetest.chat_send_player(pname, "Ошибка: " .. tostring(msg))
         end
-        -- Close the formspec after clicking track
         minetest.close_formspec(pname, "")
       end
       return true
