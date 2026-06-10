@@ -33,13 +33,13 @@
     },
     {
       "section": "texturepacks",
-      "author": "MysticTempest",
-      "name": "refi_textures",
-      "target": "refi_textures",
-      "installed_to": "data/texturepacks/refi_textures",
-      "downloaded_at": "2026-06-09T16:34:12.698000+00:00",
-      "sha256": "a58d7774dd209c634a9245f63c38ede47aceca21298c669a5d7b1f3ed8c76404",
-      "source": "ContentDB:MysticTempest/refi_textures"
+      "author": "shaft",
+      "name": "hand_painted_expanded",
+      "target": "hand_painted_expanded",
+      "installed_to": "data/texturepacks/hand_painted_expanded",
+      "downloaded_at": "2026-06-10T04:10:00+00:00",
+      "sha256": "13ca5184178ad34db78fed1464cd52372a3a582afbd142f7ad03e11ee770adce",
+      "source": "ContentDB:shaft/hand_painted_expanded"
     }
   ]
 }

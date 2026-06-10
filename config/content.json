@@ -32,9 +32,9 @@
   ],
   "texturepacks": [
     {
-      "author": "MysticTempest",
-      "name": "refi_textures",
-      "target": "refi_textures"
+      "author": "shaft",
+      "name": "hand_painted_expanded",
+      "target": "hand_painted_expanded"
     }
   ]
 }
