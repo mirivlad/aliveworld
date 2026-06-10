@@ -130,8 +130,11 @@ minetest.register_chatcommand("aw_prepare_shot", {
 	end,
 })
 
--- Try immediately and also on player join
+-- Try immediately
 auto_run()
+-- Note: on_joinplayer auto-test disabled during demo.
+-- Re-enable by uncommenting the block below:
+--[[
 minetest.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	minetest.log("action", "[aliveworld_test_suite] player joined: " .. name)
@@ -141,3 +144,4 @@ minetest.register_on_joinplayer(function(player)
 		end)
 	end
 end)
+--]]

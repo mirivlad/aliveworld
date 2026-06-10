@@ -70,6 +70,7 @@ local function add_hud(player_name, site, target_pos)
   else
     short_name = site.name or site.name_en or site.id
   end
+  local title
   if precision == "approximate" then
     title = "AW: " .. short_name .. " (примерная область)"
   else

@@ -1000,7 +1000,8 @@ minetest.register_chatcommand("aw_gps", {
         if track then
           table.insert(lines, string.format("  Current track: %s (%s)", track.title, track.site_id))
           if track.target_pos then
-            local ppos = player:get_pos()
+            local player_obj = minetest.get_player_by_name(player_name)
+            local ppos = player_obj and player_obj:get_pos()
             if ppos then
               local dx = track.target_pos.x - ppos.x
               local dz = track.target_pos.z - ppos.z

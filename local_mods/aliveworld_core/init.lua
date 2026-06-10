@@ -1146,35 +1146,16 @@ minetest.register_chatcommand("aw_compass", {
 
 -- Runtime version info
 local function get_git_commit()
-  local f = io.open(".git/HEAD", "r")
-  if not f then
-    local modpath = minetest.get_modpath("aliveworld_core")
-    if modpath then
-      f = io.open(modpath .. "/../../.git/HEAD", "r")
+  local modpath = minetest.get_modpath("aliveworld_core")
+  if modpath then
+    local f = io.open(modpath .. "/version.txt", "r")
+    if f then
+      local hash = f:read("*l")
+      f:close()
+      if hash and hash ~= "" then return hash end
     end
   end
-  if not f then return "unknown" end
-  local ref = f:read("*l")
-  f:close()
-  if ref and ref:match("^ref: ") then
-    local refpath = ".git/" .. ref:match("^ref: (.+)$")
-    local f2 = io.open(refpath, "r")
-    if f2 then
-      local hash = f2:read("*l")
-      f2:close()
-      return hash or "unknown"
-    end
-    local modpath = minetest.get_modpath("aliveworld_core")
-    if modpath then
-      f2 = io.open(modpath .. "/../../" .. refpath, "r")
-      if f2 then
-        local hash = f2:read("*l")
-        f2:close()
-        return hash or "unknown"
-      end
-    end
-  end
-  return ref or "unknown"
+  return "unknown"
 end
 
 aliveworld.version = {
