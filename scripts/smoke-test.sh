@@ -534,6 +534,86 @@ if grep -R "/opt/luanti-aliveworld" "$ROOT" \
   exit 1
 fi
 
+# ================================================
+# Luanti TestKit checks
+# ================================================
+
+required_files+=(
+  "local_mods/luanti_testkit/mod.conf"
+  "local_mods/luanti_testkit/init.lua"
+  "local_mods/luanti_testkit/api.lua"
+  "local_mods/luanti_testkit/assertions.lua"
+  "local_mods/luanti_testkit/player.lua"
+  "local_mods/luanti_testkit/suites.lua"
+  "local_mods/luanti_testkit/reporter.lua"
+  "local_mods/aliveworld_test_suite/mod.conf"
+  "local_mods/aliveworld_test_suite/init.lua"
+  "scripts/run-test-client.sh"
+  "scripts/run-luanti-tests.sh"
+  "secrets/awbot.password.example"
+  "docs/testing.md"
+)
+
+for file in "${required_files[@]}"; do
+  if [ ! -f "$ROOT/$file" ]; then
+    echo "Missing required file: $file"
+    exit 1
+  fi
+done
+
+# TestKit chat commands
+if ! grep -q 'register_chatcommand("ltk_run"' "$ROOT/local_mods/luanti_testkit/api.lua"; then
+  echo "luanti_testkit must register /ltk_run command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("ltk_all"' "$ROOT/local_mods/luanti_testkit/api.lua"; then
+  echo "luanti_testkit must register /ltk_all command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("ltk_report"' "$ROOT/local_mods/luanti_testkit/reporter.lua"; then
+  echo "luanti_testkit must register /ltk_report command"
+  exit 1
+fi
+
+if ! grep -q 'register_chatcommand("ltk_list"' "$ROOT/local_mods/luanti_testkit/reporter.lua"; then
+  echo "luanti_testkit must register /ltk_list command"
+  exit 1
+fi
+
+# TestKit suite registration
+if ! grep -q 'register_test' "$ROOT/local_mods/luanti_testkit/tests/smoke.lua"; then
+  echo "luanti_testkit smoke tests must use register_test"
+  exit 1
+fi
+
+# AliveWorld test suite checks
+if ! grep -q 'register_test.*aliveworld.*direction' "$ROOT/local_mods/aliveworld_test_suite/tests/direction.lua"; then
+  echo "aliveworld_test_suite must have direction tests (register_test)"
+  exit 1
+fi
+
+if ! grep -q 'register_test.*aliveworld.*rumor' "$ROOT/local_mods/aliveworld_test_suite/tests/rumors.lua"; then
+  echo "aliveworld_test_suite must have rumors tests"
+  exit 1
+fi
+
+if ! grep -q 'register_test.*aliveworld.*radar' "$ROOT/local_mods/aliveworld_test_suite/tests/radar.lua"; then
+  echo "aliveworld_test_suite must have radar tests"
+  exit 1
+fi
+
+# TestKit mod.conf must NOT depend on aliveworld
+if grep -q "^depends.*aliveworld" "$ROOT/local_mods/luanti_testkit/mod.conf"; then
+  echo "luanti_testkit/mod.conf must NOT depend on aliveworld (only optional_depends)"
+  exit 1
+fi
+
+# Run-test-client script must be executable
+chmod +x "$ROOT/scripts/run-test-client.sh"
+chmod +x "$ROOT/scripts/run-luanti-tests.sh"
+
 chmod +x "$ROOT/scripts/install-content.py"
 chmod +x "$ROOT/scripts/sync-local-mods.sh"
 chmod +x "$ROOT/scripts/backup-world.sh"

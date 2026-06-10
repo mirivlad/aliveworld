@@ -243,6 +243,8 @@ luanti-aliveworld/
     aliveworld_admin/       # админ-инструменты (/aw_status, /aw_bridge)
     aliveworld_player/      # player UI (слухи, мир, хроника, Rumor Board node)
     aliveworld_world/       # физические маркеры и материализация объектов в мире
+    luanti_testkit/         # универсальный тестовый фреймворк для Luanti (см. docs/testing.md)
+    aliveworld_test_suite/  # тесты AliveWorld поверх TestKit
 
   scripts/
     build-image.sh          # сборка Docker-образа
@@ -251,6 +253,14 @@ luanti-aliveworld/
     sync-local-mods.sh      # local_mods -> data/mods
     backup-world.sh         # бэкап мира
     smoke-test.sh           # проверка структуры
+    run-test-client.sh      # запуск тестового клиента Luanti
+    run-luanti-tests.sh     # хелпер для запуска тестов
+
+  secrets/                   # пароли (в .gitignore, кроме *.example)
+    awbot.password.example  # пример файла пароля для тестового бота
+
+  artifacts/
+    test-reports/           # JSON-отчёты тестов (в .gitignore)
 
   locks/
     content.lock.json       # фиксация версий контента

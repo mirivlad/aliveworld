@@ -1,0 +1,19 @@
+# Пример world.mt для dev/тестового мира с включёнными TestKit модами.
+# Для production скопируй world.mt без test-модов.
+# Копируй в data/worlds/<world_name>/world.mt
+
+gameid = minetest
+
+load_mod_aliveworld_core = true
+load_mod_aliveworld_bridge_mcl = true
+load_mod_aliveworld_admin = true
+load_mod_aliveworld_player = true
+load_mod_aliveworld_world = true
+
+# TestKit — только для dev/тестов.
+load_mod_luanti_testkit = true
+load_mod_aliveworld_test_suite = true
+
+# Внешние моды
+load_mod_mcl_decor = true
+load_mod_mcl_cozy = true

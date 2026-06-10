@@ -10,6 +10,13 @@ load_mod_aliveworld_admin = true
 load_mod_aliveworld_player = true
 load_mod_aliveworld_world = true
 
+# Remote controller — управление через JSON-файл.
+load_mod_aliveworld_remote_controller = true
+
+# TestKit — включать только для dev/тестов.
+load_mod_luanti_testkit = true
+load_mod_aliveworld_test_suite = true
+
 # Внешние моды первой волны.
 load_mod_mcl_decor = true
 load_mod_mcl_cozy = true

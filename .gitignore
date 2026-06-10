@@ -6,4 +6,9 @@ data/worlds/aliveworld/*
 !data/worlds/aliveworld/world.mt
 backups/
 locks/
+artifacts/test-reports/*.json
+artifacts/test-reports/*.log
+logs/
+secrets/*
+!secrets/awbot.password.example
 *.log
