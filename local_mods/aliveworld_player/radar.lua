@@ -9,6 +9,15 @@ local radar_state = {}  -- player_name -> {enabled, hud_ids = {bg, player, pt[1.
 
 local DEFAULT_RADIUS = 512
 local DISPLAY_RADIUS = 70  -- px from center
+local DEFAULT_ORIGIN = {x = 10, y = 10}
+
+-- Preset origins (relative to pos {1,0} i.e. top-left corner)
+local PRESETS = {
+  ["top-left"] = {x = 10, y = 10},
+  ["top-right"] = {x = -170, y = 10},
+  ["bottom-right"] = {x = -170, y = -170},
+  ["off"] = nil,
+}
 local MAX_POINTS = 8
 
 local function get_radar_offset(radar_origin)
@@ -94,8 +103,9 @@ local function get_icon(site, is_edge, is_tracked, player_pos)
 end
 
 local function get_radar_positions(from, site, radar_radius, state)
-  local dx = site.pos.x - from.x
-  local dz = site.pos.z - from.z
+  local target_pos = aliveworld.sites and aliveworld.sites.get_display_pos and aliveworld.sites.get_display_pos(site) or site.pos
+  local dx = target_pos.x - from.x
+  local dz = target_pos.z - from.z
   local dist = math.sqrt(dx * dx + dz * dz)
   local is_edge = dist > radar_radius
 
@@ -177,7 +187,7 @@ function aliveworld_player.radar.enable(player_name)
   if not radar_state[player_name] then
     radar_state[player_name] = {
       enabled = false,
-      origin = {x = -170, y = 60},
+      origin = {x = DEFAULT_ORIGIN.x, y = DEFAULT_ORIGIN.y},
       radius = DEFAULT_RADIUS,
     }
   end
@@ -230,7 +240,7 @@ function aliveworld_player.radar.set_radius(player_name, blocks)
   if not blocks or blocks < 64 then return false, "Минимальный радиус: 64 блока." end
   if blocks > 2000 then return false, "Максимальный радиус: 2000 блоков." end
   if not radar_state[player_name] then
-    radar_state[player_name] = {enabled = false, origin = {x = -170, y = 60}, radius = DEFAULT_RADIUS}
+    radar_state[player_name] = {enabled = false, origin = {x = DEFAULT_ORIGIN.x, y = DEFAULT_ORIGIN.y}, radius = DEFAULT_RADIUS}
   end
   radar_state[player_name].radius = blocks
   local player = minetest.get_player_by_name(player_name)
@@ -238,6 +248,36 @@ function aliveworld_player.radar.set_radius(player_name, blocks)
     aliveworld_player.radar.refresh_player(player)
   end
   return true, "Радиус радара изменён на " .. blocks .. " блоков."
+end
+
+function aliveworld_player.radar.get_origin_for_player(player_name)
+  local state = radar_state[player_name]
+  if not state or not state.origin then
+    return {x = DEFAULT_ORIGIN.x, y = DEFAULT_ORIGIN.y}
+  end
+  return {x = state.origin.x, y = state.origin.y}
+end
+
+function aliveworld_player.radar.set_origin_preset(player_name, preset_name)
+  preset_name = (preset_name or ""):lower()
+  local origin = PRESETS[preset_name]
+  if preset_name == "off" then
+    -- Disable radar and store no origin
+    aliveworld_player.radar.disable(player_name)
+    return true, "Radar выключен."
+  end
+  if not origin then
+    return false, "Неизвестный preset. Доступны: top-left, top-right, bottom-right, off"
+  end
+  if not radar_state[player_name] then
+    radar_state[player_name] = {enabled = false, origin = {x = origin.x, y = origin.y}, radius = DEFAULT_RADIUS}
+  end
+  radar_state[player_name].origin = {x = origin.x, y = origin.y}
+  local player = minetest.get_player_by_name(player_name)
+  if player then
+    aliveworld_player.radar.refresh_player(player)
+  end
+  return true, "Позиция радара изменена: " .. preset_name
 end
 
 function aliveworld_player.radar.clear_hud(player_name)
@@ -285,10 +325,16 @@ function aliveworld_player.radar.refresh_player(player)
       local ox, oy, is_edge = get_radar_positions(from, site, radius, state)
       local tex, _ = get_icon(site, is_edge, is_tracked, from)
 
-      -- Use anchor_pos for tracked sites if available
-      if is_tracked and (site.physical_status == "anchored" or site.physical_status == "materialized") and site.anchor_pos then
-        local tdx = site.anchor_pos.x - from.x
-        local tdz = site.anchor_pos.z - from.z
+      -- Use arrival_pos for tracked sites
+      if is_tracked then
+        local track_target = nil
+        if aliveworld.tracking then
+          local track = aliveworld.tracking.get_active_track(pname)
+          if track then track_target = track.target_pos end
+        end
+        local tpos = track_target or (site.anchor_pos or site.pos)
+        local tdx = tpos.x - from.x
+        local tdz = tpos.z - from.z
         local tdist = math.sqrt(tdx*tdx + tdz*tdz)
         local is_edge2 = tdist > radius
         if is_edge2 then
@@ -340,5 +386,33 @@ minetest.register_on_leaveplayer(function(player)
     state.hud_ids = nil
   end
 end)
+
+function aliveworld_player.radar.get_debug_info(player_name)
+  local state = radar_state[player_name]
+  if not state then
+    return {
+      enabled = false,
+      radius = DEFAULT_RADIUS,
+      hud_ids = {},
+    }
+  end
+  local ids = {}
+  if state.hud_ids then
+    ids.bg = state.hud_ids.bg
+    ids.player = state.hud_ids.player
+    ids.pts = {}
+    if state.hud_ids.pts then
+      for i, id in ipairs(state.hud_ids.pts) do
+        ids.pts[i] = id
+      end
+    end
+  end
+  return {
+    enabled = state.enabled,
+    radius = state.radius,
+    origin = state.origin,
+    hud_ids = ids,
+  }
+end
 
 minetest.log("action", "[aliveworld_player] radar module loaded")

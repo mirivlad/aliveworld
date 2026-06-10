@@ -822,18 +822,53 @@ minetest.register_chatcommand("aw_gps", {
       local enabled = aliveworld_player.radar.is_enabled(player_name)
       local radius = aliveworld_player.radar.get_radius(player_name)
       local origin = aliveworld_player.radar.get_origin_for_player(player_name)
+      -- Guess preset name from origin
+      local preset_name = "custom"
+      if origin.x == 10 and origin.y == 10 then preset_name = "top-left"
+      elseif origin.x == -170 and origin.y == 10 then preset_name = "top-right"
+      elseif origin.x == -170 and origin.y == -170 then preset_name = "bottom-right" end
       local lines = {
-        string.format("AliveWorld Radar: %s", enabled and "включён" or "выключен"),
-        string.format("Радиус: %d блоков", radius),
-        string.format("Позиция: (%d, %d)", origin.x, origin.y),
+        string.format("Player: %s", player_name),
+        string.format("GPS enabled: %s", enabled and "да" or "нет"),
+        string.format("Radar: %s", enabled and "видим" or "скрыт (выключен)"),
+        string.format("Position preset: %s (%d,%d)", preset_name, origin.x, origin.y),
+        string.format("Radius: %d", radius),
       }
-      if aliveworld_player.tracking then
-        local track_list = aliveworld_player.tracking.list(player_name)
-        table.insert(lines, string.format("Активные waypoint: %d", #track_list))
+      if aliveworld_player.radar then
+        local radar_debug = aliveworld_player.radar.get_debug_info and aliveworld_player.radar.get_debug_info(player_name)
+        if radar_debug and radar_debug.hud_ids then
+          table.insert(lines, string.format("HUD IDs: bg=%s player=%s",
+            tostring(radar_debug.hud_ids.bg), tostring(radar_debug.hud_ids.player)))
+          if radar_debug.hud_ids.pts then
+            local pt_ids = {}
+            for _, id in ipairs(radar_debug.hud_ids.pts) do
+              table.insert(pt_ids, tostring(id))
+            end
+            table.insert(lines, string.format("  Point HUDs: %s", table.concat(pt_ids, ",")))
+          end
+        end
+      end
+      if aliveworld.tracking then
+        local track = aliveworld.tracking.get_active_track(player_name)
+        local track_list = aliveworld_player.tracking and aliveworld_player.tracking.list(player_name) or {}
+        table.insert(lines, string.format("Active tracks: %d", #track_list))
+        if track then
+          table.insert(lines, string.format("  Current track: %s (%s)", track.title, track.site_id))
+          if track.target_pos then
+            local ppos = player:get_pos()
+            if ppos then
+              local dx = track.target_pos.x - ppos.x
+              local dz = track.target_pos.z - ppos.z
+              local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
+              table.insert(lines, string.format("  Distance: %d blocks", dist))
+              table.insert(lines, string.format("  Target arrival: (%d,%d,%d)", track.target_pos.x, track.target_pos.y, track.target_pos.z))
+            end
+          end
+        end
       end
       local points = aliveworld_player.radar.get_points_for_player and aliveworld_player.radar.get_points_for_player(player_name)
       if points then
-        table.insert(lines, string.format("Отображается точек: %d", #points))
+        table.insert(lines, string.format("Radar points: %d", #points))
       end
       return true, table.concat(lines, "\n")
     else
@@ -928,6 +963,8 @@ minetest.register_chatcommand("aw_gps_debug", {
       end
     end
     table.insert(lines, "")
+    -- Use shared tracking debug info
+    local debug_info = aliveworld.tracking and aliveworld.tracking.get_debug_info(player_name)
     local tracks = aliveworld_player.tracking.list(player_name)
     table.insert(lines, string.format("Active tracks count: %d", #tracks))
     for _, t in ipairs(tracks) do
@@ -936,13 +973,15 @@ minetest.register_chatcommand("aw_gps_debug", {
       table.insert(lines, string.format("  Precision: %s", t.precision))
       if t.site then
         local site = t.site
+        local phys = site.physical_status or "abstract"
         table.insert(lines, string.format("  Title: %s", site.name_en or site.name))
+        table.insert(lines, string.format("  Physical status: %s", phys))
         table.insert(lines, string.format("  Site pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
         if site.anchor_pos then
           table.insert(lines, string.format("  Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
         end
-        if aliveworld.sites and aliveworld.sites.resolve_arrival_pos then
-          local arrival_pos = aliveworld.sites.resolve_arrival_pos(site)
+        if aliveworld.sites then
+          local arrival_pos = aliveworld.sites.resolve_arrival_pos and aliveworld.sites.resolve_arrival_pos(site)
           if arrival_pos then
             table.insert(lines, string.format("  Arrival pos: (%d,%d,%d)", arrival_pos.x, arrival_pos.y, arrival_pos.z))
             local adx = arrival_pos.x - ppos.x
@@ -950,14 +989,27 @@ minetest.register_chatcommand("aw_gps_debug", {
             local adist = math.floor(math.sqrt(adx*adx + adz*adz) + 0.5)
             table.insert(lines, string.format("  Dist to arrival: %d", adist))
           end
+          local observer_pos = aliveworld.sites.resolve_observer_pos and aliveworld.sites.resolve_observer_pos(site)
+          if observer_pos then
+            table.insert(lines, string.format("  Observer pos: (%d,%d,%d)", observer_pos.x, observer_pos.y, observer_pos.z))
+          end
+          local marker_pos = aliveworld.sites.resolve_marker_pos and aliveworld.sites.resolve_marker_pos(site)
+          if marker_pos then
+            table.insert(lines, string.format("  Marker pos: (%d,%d,%d)", marker_pos.x, marker_pos.y, marker_pos.z))
+          end
         end
-        local phys = site.physical_status or "abstract"
         local precision_label = (phys == "anchored" or phys == "materialized") and "точная" or "примерная"
         table.insert(lines, string.format("  Precision label: %s", precision_label))
+        local arrival_radius = (phys == "abstract") and 30 or 12
+        table.insert(lines, string.format("  Arrival radius: %d", arrival_radius))
         local dx = t.target_pos and (t.target_pos.x - ppos.x) or (site.pos.x - ppos.x)
         local dz = t.target_pos and (t.target_pos.z - ppos.z) or (site.pos.z - ppos.z)
         local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
         table.insert(lines, string.format("  Distance to target: %d", dist))
+        table.insert(lines, string.format("  Arrived: %s", tostring(t.has_arrived)))
+        if debug_info then
+          table.insert(lines, string.format("  Arrival ack: %s", tostring(debug_info.has_arrival_ack)))
+        end
       end
     end
     local points = aliveworld_player.radar and aliveworld_player.radar.get_points_for_player and aliveworld_player.radar.get_points_for_player(player_name)
