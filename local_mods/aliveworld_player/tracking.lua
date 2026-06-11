@@ -197,6 +197,56 @@ function aliveworld_player.tracking.refresh_all()
   end
 end
 
+function aliveworld_player.tracking.check_arrival(player_or_name)
+  if not aliveworld.tracking then
+    return {ok = false, error = "tracking_module_not_loaded"}
+  end
+  local player
+  if type(player_or_name) == "string" then
+    player = minetest.get_player_by_name(player_or_name)
+  else
+    player = player_or_name
+  end
+  if not player or not player:is_player() then
+    return {ok = false, error = "player_not_found"}
+  end
+  local result = aliveworld.tracking.check_arrival(player)
+  if not result then
+    return {ok = true, has_track = false, arrived = false}
+  end
+  return {
+    ok = true,
+    has_track = true,
+    arrived = result.arrived or false,
+    site_id = result.site_id,
+    distance = result.dist,
+    arrival_radius = 12,
+    kind = result.kind,
+    msg = result.msg,
+  }
+end
+
+function aliveworld_player.tracking.get_debug_info(player_or_name)
+  if not aliveworld.tracking then
+    return {player_name = nil, error = "tracking_module_not_loaded"}
+  end
+  return aliveworld.tracking.get_debug_info(player_or_name)
+end
+
+function aliveworld_player.tracking.describe_track(player_or_name)
+  if not aliveworld.tracking then
+    return {ok = true, has_track = false, line = "Tracking module not loaded"}
+  end
+  return aliveworld.tracking.describe_track(player_or_name)
+end
+
+function aliveworld_player.tracking.reset_arrival_ack(player_or_name, site_id)
+  if not aliveworld.tracking then
+    return {ok = false, error = "tracking_module_not_loaded"}
+  end
+  return aliveworld.tracking.reset_arrival_ack(player_or_name, site_id)
+end
+
 -- Globalstep to update info HUD
 local info_tick = 0
 minetest.register_globalstep(function(dtime)

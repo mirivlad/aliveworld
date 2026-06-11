@@ -125,12 +125,29 @@ T.register_test("aliveworld", "get_debug_info_structure", function(ctx)
     ctx.skip("aliveworld.tracking not loaded")
     return
   end
+  -- Track a site first so get_debug_info has full data
+  aliveworld.tracking.untrack(ctx.player_name)
+  local available = false
+  if aliveworld.sites then
+    local site = aliveworld.sites.get("site_birch_ford")
+    if site then
+      aliveworld.tracking.track_site(ctx.player_name, "site_birch_ford")
+      available = true
+    end
+  end
   local info = aliveworld.tracking.get_debug_info(ctx.player_name)
   ctx.assert.not_nil(info, "get_debug_info must return a table")
   ctx.assert.not_nil(info.player_name, "debug info must have player_name")
-  ctx.assert.not_nil(info.active_track, "debug info must have active_track")
+  if available then
+    ctx.assert.not_nil(info.active_track, "debug info must have active_track when tracking")
+    ctx.assert.equal("site_birch_ford", info.active_track.site_id, "active_track site_id must match")
+  else
+    ctx.assert.equal(false, info.has_track, "has_track should be false when no site available")
+  end
   ctx.assert.not_nil(info.arrival_ack, "debug info must have arrival_ack")
   ctx.log("Debug info player=" .. info.player_name .. " track=" .. tostring(info.active_track and info.active_track.site_id or "none"))
+  -- Cleanup
+  aliveworld.tracking.untrack(ctx.player_name)
 end)
 
 T.register_test("aliveworld", "track_site_abstract_precision", function(ctx)

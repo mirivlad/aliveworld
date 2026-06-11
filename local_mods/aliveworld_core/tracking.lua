@@ -173,34 +173,39 @@ function aliveworld.tracking.get_active_track(player_or_name)
 end
 
 function aliveworld.tracking.describe_track(player_or_name)
-  local track = aliveworld.tracking.get_active_track(player_or_name)
-  if not track then
-    return "Нет активного waypoint."
+  local pname = (type(player_or_name) == "string") and player_or_name or (player_or_name and player_or_name:get_player_name())
+  if not pname then
+    return {ok = true, has_track = false, line = "Нет активного waypoint."}
   end
-  local pname = (type(player_or_name) == "string") and player_or_name or player_or_name:get_player_name()
+  local track = aliveworld.tracking.get_active_track(pname)
+  if not track then
+    return {ok = true, has_track = false, line = "Нет активного waypoint."}
+  end
   local player = minetest.get_player_by_name(pname)
-  local dist_str = ""
+  local dist = nil
   if player then
     local ppos = player:get_pos()
     if ppos and track.target_pos then
       local dx = track.target_pos.x - ppos.x
       local dz = track.target_pos.z - ppos.z
-      local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
-      dist_str = string.format(" Расстояние: %d блоков.", dist)
+      dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
     end
   end
-  local lines = {"=== Текущий waypoint ==="}
-  table.insert(lines, string.format("Место: %s (%s)", track.title, track.site_id))
-  if track.precision == "approximate" then
-    table.insert(lines, "Точность: примерная (известно по слухам)")
-  else
-    table.insert(lines, "Точность: точная (место отмечено)")
+  local line = "AW: " .. (track.title or track.site_id)
+  if dist then
+    line = line .. " — " .. dist .. " блоков"
   end
-  if track.has_arrived then
-    table.insert(lines, "Статус: посещено")
-  end
-  table.insert(lines, dist_str)
-  return table.concat(lines, "\n")
+  local precision_label = (track.precision == "approximate") and " (примерно)" or ""
+  line = line .. precision_label
+  return {
+    ok = true,
+    has_track = true,
+    line = line,
+    site_id = track.site_id,
+    title = track.title,
+    distance = dist,
+    precision = track.precision,
+  }
 end
 
 -- Restore track from player meta on join
@@ -311,14 +316,27 @@ function aliveworld.tracking.reset_arrival_ack(player_or_name, site_id)
       pname = player_or_name:get_player_name()
     end
   end
-  if not pname then return end
+  if not pname then
+    return {ok = false, error = "player_not_found", player_name = nil, site_id = site_id, removed = false}
+  end
+  local had_ack = false
   if site_id then
-    if arrival_ack[pname] then
+    if arrival_ack[pname] and arrival_ack[pname][site_id] then
       arrival_ack[pname][site_id] = nil
+      had_ack = true
     end
   else
+    if arrival_ack[pname] then
+      had_ack = true
+    end
     arrival_ack[pname] = nil
   end
+  return {
+    ok = true,
+    removed = had_ack,
+    player_name = pname,
+    site_id = site_id,
+  }
 end
 
 -- Get debug info for a player
@@ -331,18 +349,16 @@ function aliveworld.tracking.get_debug_info(player_or_name)
       pname = player_or_name:get_player_name()
     end
   end
-  if not pname then return nil end
+  if not pname then
+    return {player_name = nil, error = "invalid_player", gps_enabled = false, has_track = false, active_track = nil, arrival_ack = {}}
+  end
   local track = aliveworld.tracking.get_active_track(pname)
-  if not track then return nil end
   return {
     player_name = pname,
-    site_id = track.site_id,
-    title = track.title,
-    target_pos = track.target_pos,
-    precision = track.precision,
-    physical_status = track.physical_status,
-    has_arrived = track.has_arrived,
-    has_arrival_ack = arrival_ack[pname] and arrival_ack[pname][track.site_id] or false,
+    gps_enabled = (aliveworld_player and aliveworld_player.radar and aliveworld_player.radar.is_enabled(pname)) or false,
+    has_track = (track ~= nil),
+    active_track = track,
+    arrival_ack = arrival_ack[pname] or {},
   }
 end
 
