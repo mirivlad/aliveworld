@@ -39,6 +39,51 @@ end
 
 -- Text helpers
 
+-- UTF-8 safe truncation: never produce invalid UTF-8
+local function utf8_truncate(text, max_chars)
+  if not text then return "" end
+  local len = 0
+  local i = 1
+  local last_good = 0
+  while i <= #text do
+    local b = text:byte(i)
+    if b < 128 then
+      len = len + 1; i = i + 1
+    elseif b >= 192 and b < 224 then
+      len = len + 1; i = i + 2
+    elseif b >= 224 and b < 240 then
+      len = len + 1; i = i + 3
+    elseif b >= 240 and b < 248 then
+      len = len + 1; i = i + 4
+    else
+      -- invalid byte, skip
+      i = i + 1
+    end
+    if len <= max_chars then
+      last_good = i - 1
+    end
+  end
+  if len <= max_chars then return text end
+  return text:sub(1, last_good) .. ".."
+end
+
+local function utf8_len(text)
+  if not text then return 0 end
+  local n = 0
+  local i = 1
+  while i <= #text do
+    local b = text:byte(i)
+    if b < 128 then i = i + 1
+    elseif b < 192 then i = i + 1  -- continuation byte, skip
+    elseif b < 224 then i = i + 2
+    elseif b < 240 then i = i + 3
+    else i = i + 4
+    end
+    n = n + 1
+  end
+  return n
+end
+
 function aliveworld_player.get_display_text(obj)
   if obj.text_ru and obj.text_ru ~= "" then
     return obj.text_ru
@@ -98,14 +143,20 @@ local NEWS_FORMSPEC = "aliveworld_player:news"
 function aliveworld_player.show_news(player_name, player_pos)
   local formspec = {}
   table.insert(formspec, "formspec_version[4]")
-  table.insert(formspec, "size[10,12]")
-  table.insert(formspec, "label[0.2,0.2;" .. minetest.formspec_escape("=== Новости мира ===") .. "]")
+  table.insert(formspec, "size[11,12]")
 
-  local y = 0.8
+  -- Header
+  local y = 0.2
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("=== Новости мира ===") .. "]")
+  y = y + 0.6
+
   if aliveworld and aliveworld.get_date then
-    table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape(aliveworld_player.format_date()) .. "]")
-    y = y + 0.6
+    table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape(aliveworld_player.format_date()) .. "]")
+    y = y + 0.5
   end
+
+  local scroll_content_height = 0
+  local scroll_lines = {}
 
   if has_rumors() then
     local list = aliveworld.rumors.list()
@@ -117,12 +168,13 @@ function aliveworld_player.show_news(player_name, player_pos)
     end
 
     if #active == 0 then
-      y = y + 0.2
-      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Пока мир молчит. Слухов нет.") .. "]")
-    else
-      y = y + 0.2
-      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape(string.format("Активные слухи (%d)", #active)) .. "]")
+      table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Пока мир молчит. Слухов нет.") .. "]")
       y = y + 0.6
+    else
+      table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape(string.format("Активные слухи (%d)", #active)) .. "]")
+      y = y + 0.5
+
+      -- Prepare scrollable content
       for _, r in ipairs(active) do
         local text = aliveworld_player.get_display_text(r)
         local site = nil
@@ -146,29 +198,47 @@ function aliveworld_player.show_news(player_name, player_pos)
             end
           end
         end
-        -- Truncate long rumor text for formspec display
-        local display_text = text
-        if #display_text > 60 then
-          display_text = display_text:sub(1, 58) .. ".."
-        end
+        -- UTF-8 safe truncation
+        local display_text = utf8_truncate(text, 55)
         local rumor_status = ""
         if aliveworld.rumors and aliveworld.rumors.get_player_status then
           rumor_status = aliveworld.rumors.get_player_status(player_name, r.id)
         end
         local status_label = (aliveworld.rumors and aliveworld.rumors.get_status_label and aliveworld.rumors.get_status_label(rumor_status)) or ""
-        table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("• " .. display_text .. " " .. status_label) .. "]")
-        y = y + 0.4
-        table.insert(formspec, "label[0.4," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("  Истекает на день " .. r.expires_day) .. "]")
-        if site_id then
-          table.insert(formspec, "button[7," .. string.format("%.1f", y - 0.1) .. ";1.5,0.5;track_" .. site_id .. ";Отслеживать]")
-          table.insert(formspec, "button[8.5," .. string.format("%.1f", y - 0.1) .. ";1.3,0.5;detail_" .. r.id .. ";Подробнее]")
-        end
-        y = y + 0.6
+        table.insert(scroll_lines, {
+          text = display_text,
+          status = status_label,
+          day = r.expires_day,
+          site_id = site_id,
+          rumor_id = r.id,
+        })
       end
+
+      -- Build scrollable container
+      local list_y = y
+      local list_h = 8.5
+      local scrollbar = "rumors_scroll"
+
+      table.insert(formspec, "scroll_container[0.2," .. string.format("%.1f", list_y) .. ";10.5," .. string.format("%.1f", list_h) .. ";" .. scrollbar .. ";vertical;0.1]")
+
+      local sy = 0.2
+      for _, line in ipairs(scroll_lines) do
+        table.insert(formspec, "label[0.3," .. string.format("%.1f", sy) .. ";" .. minetest.formspec_escape("• " .. line.text .. " " .. line.status) .. "]")
+        sy = sy + 0.4
+        table.insert(formspec, "label[0.5," .. string.format("%.1f", sy) .. ";" .. minetest.formspec_escape("  Истекает на день " .. line.day) .. "]")
+        if line.site_id then
+          table.insert(formspec, "button[6.5," .. string.format("%.1f", sy - 0.1) .. ";2.4,0.6;track_" .. line.site_id .. ";Отслеживать]")
+          table.insert(formspec, "button[9.0," .. string.format("%.1f", sy - 0.1) .. ";1.8,0.6;detail_" .. line.rumor_id .. ";Подробнее]")
+        end
+        sy = sy + 0.7
+      end
+
+      table.insert(formspec, "scroll_container_end[]")
+      y = list_y + list_h
     end
   end
 
-  table.insert(formspec, "button_exit[8.5," .. string.format("%.1f", y + 0.3) .. ";1.5,0.6;close;Закрыть]")
+  table.insert(formspec, "button_exit[9.0," .. string.format("%.1f", y + 0.3) .. ";1.8,0.6;close;Закрыть]")
   minetest.show_formspec(player_name, NEWS_FORMSPEC, table.concat(formspec))
 end
 
@@ -189,16 +259,18 @@ function aliveworld_player.show_rumor_detail(player_name, rumor_id)
   local player_pos = get_player_pos(player_name)
   local formspec = {}
   table.insert(formspec, "formspec_version[4]")
-  table.insert(formspec, "size[10,12]")
-  table.insert(formspec, "label[0.2,0.2;" .. minetest.formspec_escape("=== Слух: подробнее ===") .. "]")
+  table.insert(formspec, "size[11,10]")
 
-  local y = 0.8
-  local text = aliveworld_player.get_display_text(rumor)
-  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Слух: " .. text) .. "]")
+  local y = 0.2
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("=== Слух: подробнее ===") .. "]")
+  y = y + 0.7
+
+  local text = utf8_truncate(aliveworld_player.get_display_text(rumor), 80)
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Слух: " .. text) .. "]")
   y = y + 0.6
-  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("ID: " .. rumor.id) .. "]")
-  y = y + 0.4
-  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Истекает: день " .. rumor.expires_day) .. "]")
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("ID: " .. rumor.id) .. "]")
+  y = y + 0.5
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Истекает: день " .. rumor.expires_day) .. "]")
   y = y + 0.6
 
   -- Find associated site
@@ -223,10 +295,10 @@ function aliveworld_player.show_rumor_detail(player_name, rumor_id)
         dist_str = string.format("%d блоков на %s", dist, dir)
       end
       local phys_label = (phys == "anchored" or phys == "materialized") and "отмечено" or "не отмечено"
-      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Место: " .. (site.name or site_id) .. " (" .. phys_label .. ")") .. "]")
-      y = y + 0.4
-      table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Расстояние: " .. dist_str) .. "]")
-      y = y + 0.6
+      table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Место: " .. (site.name or site_id) .. " (" .. phys_label .. ")") .. "]")
+      y = y + 0.5
+      table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Расстояние: " .. dist_str) .. "]")
+      y = y + 0.7
     end
   end
 
@@ -239,21 +311,29 @@ function aliveworld_player.show_rumor_detail(player_name, rumor_id)
   if aliveworld.rumors and aliveworld.rumors.get_status_label then
     rumor_status_label = aliveworld.rumors.get_status_label(rumor_player_status)
   end
-  table.insert(formspec, "label[0.2," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Статус: " .. rumor_status_label) .. "]")
-  y = y + 0.6
+  table.insert(formspec, "label[0.3," .. string.format("%.1f", y) .. ";" .. minetest.formspec_escape("Статус: " .. rumor_status_label) .. "]")
+  y = y + 0.7
 
   -- Actions
   if site_id then
-    if is_tracking then
-      table.insert(formspec, "button[0.2," .. string.format("%.1f", y) .. ";4,0.6;detail_untrack_" .. site_id .. ";Снять трек]")
-    else
-      table.insert(formspec, "button[0.2," .. string.format("%.1f", y) .. ";4,0.6;detail_track_" .. site_id .. ";Отслеживать]")
+    local player = minetest.get_player_by_name(player_name)
+    local has_track = false
+    if player and aliveworld_player.tracking then
+      local tracks = aliveworld_player.tracking.list(player_name)
+      has_track = #tracks > 0
     end
+    if has_track then
+      table.insert(formspec, "button[0.3," .. string.format("%.1f", y) .. ";3.5,0.6;detail_untrack_" .. site_id .. ";Снять трек]")
+    else
+      table.insert(formspec, "button[0.3," .. string.format("%.1f", y) .. ";3.5,0.6;detail_track_" .. site_id .. ";Отслеживать]")
+    end
+    table.insert(formspec, "button[4.0," .. string.format("%.1f", y) .. ";2.5,0.6;detail_back;Назад]")
+    table.insert(formspec, "button_exit[6.8," .. string.format("%.1f", y) .. ";2.0,0.6;detail_close;Закрыть]")
+  else
+    table.insert(formspec, "button[0.3," .. string.format("%.1f", y) .. ";2.5,0.6;detail_back;Назад]")
+    table.insert(formspec, "button_exit[3.0," .. string.format("%.1f", y) .. ";2.0,0.6;detail_close;Закрыть]")
   end
-  table.insert(formspec, "button[4.5," .. string.format("%.1f", y) .. ";2.5,0.6;detail_back;Назад]")
-  y = y + 0.8
 
-  table.insert(formspec, "button_exit[8.5," .. string.format("%.1f", y) .. ";1.5,0.6;detail_close;Закрыть]")
   minetest.show_formspec(player_name, DETAIL_FORMSPEC, table.concat(formspec))
 end
 
