@@ -32,6 +32,7 @@ done
 
 DOCKER_COMPOSE="$ROOT/docker-compose.yml"
 DOCKERFILE="$ROOT/Dockerfile"
+WORLD_MT="$ROOT/data/worlds/aliveworld/world.mt"
 
 # docker-compose.yml checks
 if grep -q "lscr.io/linuxserver" "$DOCKER_COMPOSE"; then
@@ -61,6 +62,42 @@ fi
 
 if ! grep -q -- "--terminal" "$DOCKER_COMPOSE"; then
   echo "docker-compose.yml must use --terminal"
+  exit 1
+fi
+
+# Dev world mapgen checks
+if ! grep -q "^gameid = mineclonia$" "$WORLD_MT"; then
+  echo "world.mt must use gameid = mineclonia"
+  exit 1
+fi
+
+if ! grep -q "^mg_name = carpathian$" "$WORLD_MT"; then
+  echo "world.mt must use mg_name = carpathian"
+  exit 1
+fi
+
+if ! grep -q "^water_level = 1$" "$WORLD_MT"; then
+  echo "world.mt must use water_level = 1"
+  exit 1
+fi
+
+if ! grep -q "^chunksize = 5$" "$WORLD_MT"; then
+  echo "world.mt must use chunksize = 5"
+  exit 1
+fi
+
+if grep -q "^mgv7_spflags" "$WORLD_MT"; then
+  echo "world.mt must not carry mgv7_spflags for carpathian mapgen"
+  exit 1
+fi
+
+if grep -q "5663755894446027356" "$WORLD_MT"; then
+  echo "world.mt must not use the old v7 seed"
+  exit 1
+fi
+
+if ! grep -q "^fixed_map_seed = " "$WORLD_MT"; then
+  echo "world.mt must set fixed_map_seed for reproducible first world creation"
   exit 1
 fi
 
@@ -487,6 +524,46 @@ if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_gps.png" ]; th
   echo "aliveworld_player must have aliveworld_gps.png texture"
   exit 1
 fi
+
+python3 - "$ROOT" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+mods_root = root / "local_mods"
+texture_refs = re.compile(r'["\'](aliveworld_[A-Za-z0-9_./-]+\.png)["\']')
+
+def required_deps(mod_dir):
+    mod_conf = mod_dir / "mod.conf"
+    deps = []
+    if not mod_conf.exists():
+        return deps
+    for line in mod_conf.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("depends"):
+            _, value = line.split("=", 1)
+            deps.extend(d.strip() for d in value.split(",") if d.strip())
+    return deps
+
+errors = []
+for mod_dir in sorted(mods_root.glob("aliveworld_*")):
+    if mod_dir.name == "aliveworld_test_suite" or not mod_dir.is_dir():
+        continue
+    owners = [mod_dir] + [mods_root / dep for dep in required_deps(mod_dir)]
+    for lua_file in mod_dir.rglob("*.lua"):
+        text = lua_file.read_text(encoding="utf-8")
+        for texture in sorted(set(texture_refs.findall(text))):
+            found = any((owner / "textures" / texture).exists() for owner in owners)
+            if not found:
+                rel = lua_file.relative_to(root)
+                errors.append(f"{rel} references {texture} outside its mod or required deps")
+
+if errors:
+    for error in errors:
+        print(error)
+    sys.exit(1)
+PY
 
 # README checks
 if ! grep -q "/aw_site_debug" "$ROOT/README.md"; then

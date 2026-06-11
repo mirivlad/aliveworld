@@ -175,6 +175,24 @@ docker compose start
 docker logs luanti-aliveworld
 ```
 
+## Dev World Mapgen
+
+The development world `aliveworld` is generated with Mineclonia on Luanti
+`carpathian` mapgen:
+
+```ini
+gameid = mineclonia
+mg_name = carpathian
+water_level = 1
+chunksize = 5
+```
+
+Mapgen settings are baked into generated map data. Changing `mg_name`, seed, or
+mapgen-specific settings must be done by deleting and recreating the world; do
+not apply a new mapgen over an already-generated map. The current dev world seed
+is stored explicitly in `data/worlds/aliveworld/world.mt` and copied into
+`map_meta.txt` by Luanti on first start.
+
 ## Обновление наших модов
 
 ```bash

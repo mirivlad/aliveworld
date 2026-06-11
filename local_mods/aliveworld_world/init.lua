@@ -67,22 +67,22 @@ end
 local marker_tiles = {}
 
 -- Settlement marker: road sign / post
-marker_tiles.settlement_marker = "aliveworld_rumor_board_front.png"
+marker_tiles.settlement_marker = "aliveworld_world_marker.png"
 
 -- Road warning sign
-marker_tiles.road_warning_sign = "aliveworld_rumor_board_front.png"
+marker_tiles.road_warning_sign = "aliveworld_world_marker.png"
 
 -- Supply crate
-marker_tiles.supply_crate = "aliveworld_rumor_board_front.png"
+marker_tiles.supply_crate = "aliveworld_world_marker.png"
 
 -- Camp marker
-marker_tiles.camp_marker = "aliveworld_rumor_board_front.png"
+marker_tiles.camp_marker = "aliveworld_world_marker.png"
 
 -- Notice stake
-marker_tiles.notice_stake = "aliveworld_rumor_board_front.png"
+marker_tiles.notice_stake = "aliveworld_world_marker.png"
 
 -- Event marker
-marker_tiles.event_marker = "aliveworld_rumor_board_front.png"
+marker_tiles.event_marker = "aliveworld_world_marker.png"
 
 minetest.register_node("aliveworld_world:settlement_marker",
   make_marker_node("AliveWorld Settlement Marker", marker_tiles.settlement_marker))

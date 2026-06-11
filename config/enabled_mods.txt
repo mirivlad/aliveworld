@@ -1,6 +1,18 @@
+# Required AliveWorld mods.
 aliveworld_core
 aliveworld_bridge_mcl
 aliveworld_admin
+aliveworld_player
+aliveworld_world
+
+# External Mineclonia support mods.
 mcl_decor
+mcl_cozy
+
+# Dev/test mods; not part of a production set unless explicitly enabled.
+aliveworld_remote_controller
+luanti_testkit
+aliveworld_test_suite
+
 # worldedit
 # protector
