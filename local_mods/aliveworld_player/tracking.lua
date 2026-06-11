@@ -1,61 +1,45 @@
 -- aliveworld_player/tracking.lua
--- Player-facing waypoint tracking UI, delegates to aliveworld.tracking shared API
+-- Player-facing tracking: compact info text + GPS marker.
+-- Old 3D waypoint HUD is removed; tracking targets appear on GPS minimap.
 
 aliveworld_player.tracking = {}
 
-local hud_ids = {}  -- player_name -> hud_id (waypoint)
-local info_hud_ids = {}  -- player_name -> info_text hud_id (compact distance/status line)
-
-local COLORS = {
-  settlement = 0x00CC44,
-  dangerous_roads = 0xFF3333,
-  food_shortage = 0xFF8800,
-  winter_hardship = 0x66AAFF,
-  unrest = 0xFF44FF,
-  trade_opportunity = 0x33FFFF,
-  recovery = 0x33FF88,
-  default = 0x888888,
-  abstract = 0x666666,
-}
-
-local function get_color(site)
-  if not site then return COLORS.default end
-  if site.physical_status ~= "anchored" and site.physical_status ~= "materialized" then
-    return COLORS.abstract
-  end
-  if site.type == "settlement" then return COLORS.settlement end
-  if site.type == "event" and site.subtype then
-    return COLORS[site.subtype] or COLORS.default
-  end
-  return COLORS.default
-end
+local COLOR_DEFAULT = 0xFFFFFF
+local info_hud_ids = {}
 
 local function remove_hud(player_name)
   local player = minetest.get_player_by_name(player_name)
-  if player then
-    if hud_ids[player_name] then
-      player:hud_remove(hud_ids[player_name])
-    end
-    if info_hud_ids[player_name] then
-      player:hud_remove(info_hud_ids[player_name])
-    end
+  if player and info_hud_ids[player_name] then
+    player:hud_remove(info_hud_ids[player_name])
   end
-  hud_ids[player_name] = nil
   info_hud_ids[player_name] = nil
 end
 
-local function add_hud(player_name, site, target_pos)
+local function add_info_hud(player_name, short_name)
   remove_hud(player_name)
   local player = minetest.get_player_by_name(player_name)
-  if not player then return false, "Player not found" end
+  if not player then return false end
 
-  local color = get_color(site)
-  local track = aliveworld.tracking and aliveworld.tracking.get_active_track(player_name)
-  local precision = track and track.precision or "approximate"
-  -- Compose short display name: settlement name + event type label
-  local short_name
+  -- Compact info text: positioned below GPS minimap area
+  local id = player:hud_add({
+    hud_elem_type = "text",
+    position = { x = 1, y = 0 },
+    alignment = { x = -1, y = 1 },
+    offset = { x = -220, y = 80 },
+    text = "AW: " .. short_name,
+    scale = { x = 100, y = 100 },
+    number = COLOR_DEFAULT,
+  })
+  if id then
+    info_hud_ids[player_name] = id
+    return true
+  end
+  return false
+end
+
+local function get_short_name(site)
+  if not site then return "?" end
   if site.type == "event" then
-    local settlement_name = site.settlement_id or ""
     local subtype_labels = {
       dangerous_roads = "опасная дорога",
       food_shortage = "нехватка еды",
@@ -66,44 +50,9 @@ local function add_hud(player_name, site, target_pos)
       default = "событие",
     }
     local label = subtype_labels[site.subtype] or subtype_labels.default
-    short_name = settlement_name .. " — " .. label
-  else
-    short_name = site.name or site.name_en or site.id
+    return (site.settlement_id or "") .. " — " .. label
   end
-  local title
-  if precision == "approximate" then
-    title = "AW: " .. short_name .. " (примерная область)"
-  else
-    title = "AW: " .. short_name
-  end
-
-  local hud_id = player:hud_add({
-    hud_elem_type = "waypoint",
-    name = title,
-    text = "m",
-    precision = 0,
-    number = color,
-    world_pos = target_pos,
-  })
-  if not hud_id then return false, "Failed to add HUD element" end
-
-  hud_ids[player_name] = hud_id
-
-  -- Add compact info text HUD (tracking status + distance)
-  local info_hud = player:hud_add({
-    hud_elem_type = "text",
-    position = {x = 0, y = 0},
-    offset = {x = 10, y = 10},
-    text = "AW track: " .. short_name,
-    alignment = {x = 0, y = 0},
-    scale = {x = 100, y = 100},
-    number = 0xFFFFFF,
-  })
-  if info_hud then
-    info_hud_ids[player_name] = info_hud
-  end
-
-  return true, precision
+  return site.name or site.name_en or site.id
 end
 
 function aliveworld_player.tracking.track_site(player_name, site_id, opts)
@@ -123,17 +72,19 @@ function aliveworld_player.tracking.track_site(player_name, site_id, opts)
 
   local site = aliveworld.sites.get(result.resolved_site_id)
   if site then
-    local ok, precision = add_hud(player_name, site, result.target_pos)
-    if not ok then
-      return false, precision
+    local short_name = get_short_name(site)
+    add_info_hud(player_name, short_name)
+    -- Notify GPS to refresh markers
+    if aliveworld_player.radar and aliveworld_player.radar.is_enabled(player_name) then
+      aliveworld_player.radar.mark_dirty(player_name)
     end
     local site_name = result.title or site_id
-    if precision == "approximate" then
-      return true, "Waypoint установлен на " .. site_name .. ". След ведёт к окрестностям. Это примерная область по слухам."
+    if result.precision == "approximate" then
+      return true, "Отслеживание: " .. site_name .. " (примерная область). Цель на GPS."
     end
-    return true, "Waypoint установлен на " .. site_name .. "."
+    return true, "Отслеживание: " .. site_name .. ". Цель на GPS."
   end
-  return true, "Waypoint установлен."
+  return true, "Отслеживание установлено."
 end
 
 function aliveworld_player.tracking.track_event(player_name, event_id)
@@ -184,10 +135,14 @@ function aliveworld_player.tracking.untrack(player_name, track_id)
   end
   remove_hud(player_name)
   local result = aliveworld.tracking.untrack(player_name)
-  if result.had_track then
-    return true, "Waypoint для " .. result.site_id .. " убран."
+  -- Notify GPS
+  if aliveworld_player.radar and aliveworld_player.radar.is_enabled(player_name) then
+    aliveworld_player.radar.mark_dirty(player_name)
   end
-  return true, "Нет активного waypoint."
+  if result.had_track then
+    return true, "Отслеживание " .. result.site_id .. " остановлено."
+  end
+  return true, "Нет активного отслеживания."
 end
 
 function aliveworld_player.tracking.clear(player_name)
@@ -201,7 +156,6 @@ function aliveworld_player.tracking.list(player_name)
     site_id = track.site_id,
     site = track.site,
     precision = track.precision,
-    hud_id = hud_ids[player_name],
     target_pos = track.target_pos,
     has_arrived = track.has_arrived,
   }}
@@ -212,11 +166,14 @@ function aliveworld_player.tracking.refresh_player(player)
   local pname = player:get_player_name()
   if not aliveworld.tracking then return end
   local track = aliveworld.tracking.get_active_track(pname)
-  if not track then return end
-  if not hud_ids[pname] then
+  if not track then
+    remove_hud(pname)
+    return
+  end
+  if not info_hud_ids[pname] then
     local site = track.site
     if site then
-      add_hud(pname, site, track.target_pos)
+      add_info_hud(pname, get_short_name(site))
     end
   end
   -- Update info text with distance
@@ -227,7 +184,7 @@ function aliveworld_player.tracking.refresh_player(player)
       local dz = track.target_pos.z - ppos.z
       local dist = math.floor(math.sqrt(dx*dx + dz*dz) + 0.5)
       local track_name = track.title or ""
-      local precision_label = (track.precision == "approximate") and "· примерная область" or ""
+      local precision_label = (track.precision == "approximate") and "· примерно" or ""
       local info_text = string.format("AW: %s · %d м %s", track_name, dist, precision_label)
       player:hud_change(info_hud_ids[pname], "text", info_text)
     end
@@ -244,7 +201,7 @@ end
 local info_tick = 0
 minetest.register_globalstep(function(dtime)
   info_tick = info_tick + dtime
-  if info_tick >= 1.0 then
+  if info_tick >= 0.5 then
     info_tick = 0
     aliveworld_player.tracking.refresh_all()
   end
