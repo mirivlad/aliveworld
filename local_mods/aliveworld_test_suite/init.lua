@@ -34,6 +34,7 @@ local test_files = {
 	"gps",
 	"radar",
 	"anchors",
+	"routes",
 	"rumors",
 	"tracking_state",
 	"rumors_flow",

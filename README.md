@@ -103,6 +103,22 @@ docker attach luanti-aliveworld
 /aw_site_debug <id>    # full site debug info with player distances
 /aw_whereami [player]  # player coords + nearest sites
 /aw_compass <player> <site>  # direction/distance from player to site
+/aw_routes             # list planned/materialized routes
+/aw_route <id>         # route summary without full point dump
+/aw_route_plan <id>    # start budgeted route planning
+/aw_route_replan <id>  # force route replanning
+/aw_route_debug <id>   # route/job debug info
+
+### Route Planning
+
+`aliveworld_core` stores deterministic planned routes in mod storage. A planned
+route records control points, terrain metrics, water crossings, and a spatial
+corridor claim, but does not place road blocks, bridges, signs, or buildings.
+
+The canonical first route is `old_road`: Birch Ford (`site_birch_ford`) to Stone
+Gully (`site_stone_gully`). The logical `site_old_road` is linked to this route
+after planning; its existing anchor is not used as a waypoint and is not silently
+migrated.
 
 ### Reality Anchoring & Physical Event Markers
 

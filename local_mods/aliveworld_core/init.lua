@@ -263,6 +263,8 @@ load()
 dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/terrain.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/claims.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/routes.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/tracking.lua")
@@ -1084,6 +1086,170 @@ minetest.register_chatcommand("aw_site_survey", {
       "Survey: " .. (survey.ok and "ok" or "rejected"),
       format_survey_summary(survey),
     }
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+local function format_route_summary(route)
+  if not route then return "Route: none" end
+  local crossings = route.crossings or {}
+  local claim = (aliveworld.claims and route.claim_id and aliveworld.claims.get(route.claim_id)) and "yes" or "no"
+  return string.format(
+    "%s %s %s->%s status=%s points=%d length=%d gain=%d loss=%d max_grade=%.3f water=%d claim=%s planner=%s expanded=%s",
+    route.route_id or "?",
+    route.kind or "route",
+    route.from_site_id or "?",
+    route.to_site_id or "?",
+    route.status or "?",
+    route.points and #route.points or 0,
+    route.length or 0,
+    route.elevation_gain or 0,
+    route.elevation_loss or 0,
+    route.max_grade or 0,
+    #crossings,
+    claim,
+    tostring(route.planner_version or "none"),
+    tostring(route.planning and route.planning.nodes_expanded or "0")
+  )
+end
+
+minetest.register_chatcommand("aw_routes", {
+  params = "",
+  description = "List planned AliveWorld routes",
+  privs = {server = true},
+  func = function()
+    if not aliveworld.routes then
+      return false, "Routes module not loaded"
+    end
+    local list = aliveworld.routes.list()
+    if #list == 0 then
+      return true, "No routes."
+    end
+    local lines = {}
+    table.insert(lines, string.format("%-16s %-8s %-18s %-18s %-10s %-7s %-8s %-8s %-8s %-6s",
+      "ID", "Kind", "From", "To", "Status", "Points", "Length", "MaxGr", "Water", "Claim"))
+    table.insert(lines, string.rep("-", 110))
+    for _, route in ipairs(list) do
+      local claim = (aliveworld.claims and route.claim_id and aliveworld.claims.get(route.claim_id)) and "yes" or "no"
+      table.insert(lines, string.format("%-16s %-8s %-18s %-18s %-10s %-7d %-8d %-8.3f %-8d %-6s",
+        route.route_id, route.kind or "", route.from_site_id or "", route.to_site_id or "",
+        route.status or "", route.points and #route.points or 0, route.length or 0,
+        route.max_grade or 0, route.crossings and #route.crossings or 0, claim))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_route", {
+  params = "<route_id>",
+  description = "Show route summary",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route <route_id>"
+    end
+    if not aliveworld.routes then
+      return false, "Routes module not loaded"
+    end
+    local route = aliveworld.routes.get(param)
+    if not route then
+      return false, "Route not found: " .. param
+    end
+    local lines = {format_route_summary(route)}
+    if route.bbox then
+      table.insert(lines, string.format("BBox: min=(%d,%d,%d) max=(%d,%d,%d)",
+        route.bbox.min.x, route.bbox.min.y, route.bbox.min.z,
+        route.bbox.max.x, route.bbox.max.y, route.bbox.max.z))
+    end
+    if route.planning then
+      table.insert(lines, string.format("Planning: candidates=%d expanded=%d elapsed_ms=%d total_cost=%.1f",
+        route.planning.candidates_examined or 0,
+        route.planning.nodes_expanded or 0,
+        route.planning.elapsed_ms or 0,
+        route.planning.total_cost or 0))
+    end
+    table.insert(lines, string.format("Cell size: %d | Planner version: %s | World seed: %s",
+      route.cell_size or 0, tostring(route.planner_version or "none"), tostring(route.world_seed or "")))
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_route_plan", {
+  params = "<route_id>",
+  description = "Start route planning job",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_plan <route_id>"
+    end
+    if not aliveworld.routes then
+      return false, "Routes module not loaded"
+    end
+    local ok, result = aliveworld.routes.start_plan_route(param, {
+      cell_size = 16,
+      nodes_per_step = 80,
+      max_nodes = 9000,
+    })
+    if not ok then
+      return false, "Route planning failed: " .. tostring(result.error or "unknown")
+    end
+    return true, string.format("Route planning %s for %s %s->%s",
+      result.status or "started", result.route_id or param, result.from_site_id or "?", result.to_site_id or "?")
+  end,
+})
+
+minetest.register_chatcommand("aw_route_replan", {
+  params = "<route_id>",
+  description = "Force route replanning",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_replan <route_id>"
+    end
+    if not aliveworld.routes then
+      return false, "Routes module not loaded"
+    end
+    local ok, result = aliveworld.routes.start_plan_route(param, {
+      force_replan = true,
+      cell_size = 16,
+      nodes_per_step = 80,
+      max_nodes = 9000,
+    })
+    if not ok then
+      return false, "Route replanning failed: " .. tostring(result.error or "unknown")
+    end
+    return true, "Route replanning started: " .. param
+  end,
+})
+
+minetest.register_chatcommand("aw_route_debug", {
+  params = "<route_id>",
+  description = "Show route planning debug status",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_debug <route_id>"
+    end
+    if not aliveworld.routes then
+      return false, "Routes module not loaded"
+    end
+    local route = aliveworld.routes.get(param)
+    local job = aliveworld.routes.get_job and aliveworld.routes.get_job(param)
+    local lines = {}
+    if route then
+      table.insert(lines, format_route_summary(route))
+    else
+      table.insert(lines, "Route: not saved")
+    end
+    if job then
+      table.insert(lines, string.format("Job: %s expanded=%d examined=%d open=%d",
+        job.status or "unknown", job.nodes_expanded or 0, job.candidates_examined or 0, job.open and #job.open or 0))
+      if job.result and job.result.error then
+        table.insert(lines, "Job error: " .. job.result.error)
+      end
+    else
+      table.insert(lines, "Job: none")
+    end
     return true, table.concat(lines, "\n")
   end,
 })

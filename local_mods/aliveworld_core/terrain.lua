@@ -6,6 +6,7 @@ aliveworld.terrain = aliveworld.terrain or {}
 local terrain = aliveworld.terrain
 
 terrain.ANCHOR_VERSION = 1
+terrain.ROUTE_COST_VERSION = 1
 
 local DEFAULT_MIN_Y = -64
 local DEFAULT_MAX_Y = 160
@@ -134,6 +135,13 @@ local function is_plantlike(name)
     or (def and def.drawtype == "plantlike")
     or (name or ""):find("flower", 1, true) ~= nil
     or (name or ""):find("grass", 1, true) ~= nil
+end
+
+local function is_blocked_for_route(name)
+  if name == "ignore" then return true end
+  if is_tree_or_leaf(name) then return true end
+  local def = node_def(name)
+  return def and def.walkable ~= false
 end
 
 local function is_buildable_surface(name)
@@ -317,6 +325,12 @@ function terrain.survey(pos, opts)
     {x = center.x - sample_radius, y = min_y, z = center.z - sample_radius},
     {x = center.x + sample_radius, y = max_y, z = center.z + sample_radius}
   )
+  if minetest.load_area then
+    pcall(minetest.load_area,
+      {x = center.x - sample_radius, y = min_y, z = center.z - sample_radius},
+      {x = center.x + sample_radius, y = max_y, z = center.z + sample_radius}
+    )
+  end
 
   local input_node = center.y and minetest.get_node(center) or {name = "air"}
   if input_node.name == "ignore" then
@@ -568,6 +582,193 @@ function terrain.summarize_survey(survey)
     total_score = survey.total_score,
     flags = copy_table(survey.flags),
     rejections = copy_table(survey.rejections),
+  }
+end
+
+local function route_surface_at(x, z, min_y, max_y)
+  local best_liquid = nil
+  for y = max_y, min_y, -1 do
+    local pos = {x = x, y = y, z = z}
+    local node = minetest.get_node(pos)
+    if node.name == "ignore" then
+      return nil, "area_not_loaded"
+    end
+    if is_liquid(node.name) and not best_liquid then
+      best_liquid = {pos = {x = x, y = y + 1, z = z}, surface_node = node.name, liquid = true}
+    end
+    if is_buildable_surface(node.name) then
+      local stand = minetest.get_node({x = x, y = y + 1, z = z})
+      local head = minetest.get_node({x = x, y = y + 2, z = z})
+      local below = minetest.get_node({x = x, y = y - 1, z = z})
+      if stand.name == "ignore" or head.name == "ignore" or below.name == "ignore" then
+        return nil, "area_not_loaded"
+      end
+      if is_clear_standing_node(stand.name) and not is_blocked_for_route(head.name) then
+        return {
+          pos = {x = x, y = y + 1, z = z},
+          surface_node = node.name,
+          head_node = head.name,
+          stand_node = stand.name,
+          below_node = below.name,
+          liquid = false,
+          supported = is_buildable_surface(below.name),
+          blocked = false,
+        }
+      end
+    end
+  end
+  if best_liquid then
+    return best_liquid
+  end
+  return nil, "no_surface"
+end
+
+function terrain.route_sample(pos, opts)
+  opts = opts or {}
+  local sample_radius = opts.sample_radius or 8
+  local min_y = opts.min_y or DEFAULT_MIN_Y
+  local max_y = opts.max_y or DEFAULT_MAX_Y
+  local center = {
+    x = math.floor((pos.x or 0) + 0.5),
+    z = math.floor((pos.z or 0) + 0.5),
+  }
+  minetest.emerge_area(
+    {x = center.x - sample_radius, y = min_y, z = center.z - sample_radius},
+    {x = center.x + sample_radius, y = max_y, z = center.z + sample_radius}
+  )
+  if minetest.load_area then
+    pcall(minetest.load_area,
+      {x = center.x - sample_radius, y = min_y, z = center.z - sample_radius},
+      {x = center.x + sample_radius, y = max_y, z = center.z + sample_radius}
+    )
+  end
+
+  local surface, reason = route_surface_at(center.x, center.z, min_y, max_y)
+  if not surface then
+    return {
+      ok = false,
+      pos = {x = center.x, y = pos.y or 0, z = center.z},
+      surface_node = nil,
+      buildable_ratio = 0,
+      solid_ratio = 0,
+      water_ratio = 0,
+      area_score = 0,
+      height_range = 0,
+      flags = {area_not_loaded = reason == "area_not_loaded", blocked = reason ~= "area_not_loaded"},
+      rejections = {reason or "no_surface"},
+    }
+  end
+
+  local survey = terrain.survey({x = center.x, y = surface.pos.y, z = center.z}, {
+    profile = opts.profile or "generic",
+    sample_radius = sample_radius,
+    sample_step = opts.sample_step or 4,
+    min_y = min_y,
+    max_y = max_y,
+    min_total_score = 0,
+    min_buildable_ratio = 0,
+    max_water_ratio = 1,
+    min_area_score = 0,
+    max_height_range = opts.max_height_range or 24,
+    require_water = false,
+  })
+  local flags = copy_table((survey and survey.flags) or {})
+  flags.water = surface.liquid or ((survey and survey.water_ratio or 0) >= 0.35)
+  flags.liquid = surface.liquid
+  flags.blocked = surface.blocked or flags.blocked or false
+  flags.unsupported = (not surface.liquid) and (not surface.supported)
+  flags.tree = is_tree_or_leaf(surface.surface_node) or is_tree_or_leaf(surface.head_node)
+  flags.area_not_loaded = flags.area_not_loaded or false
+
+  local ok = not flags.area_not_loaded
+    and not flags.blocked
+    and not flags.tree
+    and ((survey and survey.ok) or surface.liquid or true)
+
+  return {
+    ok = ok,
+    pos = {x = surface.pos.x, y = surface.pos.y, z = surface.pos.z},
+    surface_node = surface.surface_node,
+    head_node = surface.head_node,
+    stand_node = surface.stand_node,
+    below_node = surface.below_node,
+    buildable_ratio = survey and survey.buildable_ratio or (surface.liquid and 0 or 1),
+    solid_ratio = survey and survey.solid_ratio or (surface.liquid and 0 or 1),
+    water_ratio = surface.liquid and 1 or (survey and survey.water_ratio or 0),
+    area_score = survey and survey.area_score or 1,
+    slope_score = survey and survey.slope_score or 1,
+    height_range = survey and survey.height_range or 0,
+    average_y = survey and survey.average_y or surface.pos.y,
+    flags = flags,
+    rejections = survey and survey.rejections or {},
+  }
+end
+
+function terrain.route_step_cost(from_cell, to_cell, opts)
+  opts = opts or {}
+  local from_pos = from_cell and from_cell.pos
+  local to_pos = to_cell and to_cell.pos
+  if not from_pos or not to_pos then
+    return {cost = math.huge, passable = false, reason = "missing_position"}
+  end
+
+  local dx = to_pos.x - from_pos.x
+  local dz = to_pos.z - from_pos.z
+  local dy = (to_pos.y or 0) - (from_pos.y or 0)
+  local horizontal = opts.step_distance or math.sqrt(dx * dx + dz * dz)
+  if horizontal <= 0 then horizontal = 1 end
+  local grade = math.abs(dy) / horizontal
+  local flags = to_cell.flags or {}
+  local water_ratio = to_cell.water_ratio or 0
+  local buildable_ratio = to_cell.buildable_ratio or 0
+  local solid_ratio = to_cell.solid_ratio or 0
+  local area_score = to_cell.area_score or 0
+  local water_run = opts.water_run or 0
+
+  if flags.area_not_loaded then
+    return {cost = math.huge, passable = false, reason = "area_not_loaded", grade = grade}
+  end
+  if flags.blocked or flags.tree then
+    return {cost = math.huge, passable = false, reason = flags.tree and "tree" or "blocked", grade = grade}
+  end
+  if grade > (opts.max_grade or 1.1) and not flags.water then
+    return {cost = math.huge, passable = false, reason = "impassable_grade", grade = grade}
+  end
+
+  local cost = horizontal
+  cost = cost + math.abs(dy) * 5
+  cost = cost + grade * horizontal * 14
+  if flags.steep or grade > 0.45 then
+    cost = cost + horizontal * 8
+  elseif grade > 0.22 then
+    cost = cost + horizontal * 3
+  end
+  if flags.water or flags.liquid or water_ratio > 0.35 then
+    cost = cost + horizontal * (18 + water_run * 8) + water_ratio * horizontal * 10
+  end
+  if flags.unsupported then
+    cost = cost + horizontal * 5
+  end
+  if flags.fragmented or area_score < 0.65 then
+    cost = cost + horizontal * (1 - area_score) * 8
+  end
+  cost = cost + horizontal * math.max(0, 1 - buildable_ratio) * 5
+  cost = cost + horizontal * math.max(0, 1 - solid_ratio) * 3
+
+  if opts.previous_direction and opts.direction and opts.previous_direction ~= opts.direction then
+    cost = cost + horizontal * 0.18
+  end
+  if opts.backtrack then
+    cost = cost + horizontal * 0.5
+  end
+
+  return {
+    cost = cost,
+    passable = true,
+    grade = grade,
+    elevation_delta = dy,
+    water = flags.water or flags.liquid or water_ratio > 0.35,
+    flags = copy_table(flags),
   }
 end
 
