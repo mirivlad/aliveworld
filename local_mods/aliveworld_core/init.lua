@@ -261,6 +261,7 @@ end
 load()
 
 dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/terrain.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
@@ -966,6 +967,123 @@ minetest.register_chatcommand("aw_site_debug", {
         end
       end
     end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+local function format_survey_summary(survey)
+  if not survey then return "survey: none" end
+  return string.format(
+    "pos=(%d,%d,%d) surface=%s score=%.2f height=%d water=%d buildable=%.2f area=%.2f access=%.2f reasons=%s",
+    survey.pos and survey.pos.x or 0,
+    survey.pos and survey.pos.y or 0,
+    survey.pos and survey.pos.z or 0,
+    survey.surface_node or "unknown",
+    survey.total_score or 0,
+    survey.height_range or 0,
+    survey.water_distance or -1,
+    survey.buildable_ratio or 0,
+    survey.area_score or 0,
+    survey.accessibility_score or 0,
+    table.concat(survey.rejections or {}, ",")
+  )
+end
+
+minetest.register_chatcommand("aw_site_anchor", {
+  params = "<site_id>",
+  description = "Start terrain-aware anchor search for a site",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_site_anchor <site_id>"
+    end
+    if not aliveworld.sites or not aliveworld.sites.start_anchor_site then
+      return false, "Site anchoring API not loaded"
+    end
+    local ok, result = aliveworld.sites.start_anchor_site(param, {
+      max_radius = 256,
+      max_candidates = 160,
+      candidates_per_step = 4,
+    })
+    if not ok then
+      return false, "Anchor failed: " .. (result.error or "unknown")
+    end
+    return true, string.format("Anchor search %s for %s profile=%s checked=%d/%d steps=%d",
+      result.status or "started",
+      result.site_id or param,
+      result.profile or "unknown",
+      result.checked or 0,
+      result.candidates and #result.candidates or 0,
+      result.steps or 0)
+  end,
+})
+
+minetest.register_chatcommand("aw_site_anchor_status", {
+  params = "<site_id>",
+  description = "Show terrain anchor status and summary for a site",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_site_anchor_status <site_id>"
+    end
+    if not aliveworld.sites then
+      return false, "Sites module not loaded"
+    end
+    local site = aliveworld.sites.get(param)
+    if not site then
+      return false, "Site not found: " .. param
+    end
+    local job = aliveworld.sites.get_anchor_job and aliveworld.sites.get_anchor_job(site.id)
+    local lines = {}
+    table.insert(lines, string.format("Site: %s", site.id))
+    table.insert(lines, string.format("Physical status: %s", site.physical_status or "abstract"))
+    if site.anchor_pos then
+      table.insert(lines, string.format("Anchor pos: (%d,%d,%d)", site.anchor_pos.x, site.anchor_pos.y, site.anchor_pos.z))
+    else
+      table.insert(lines, "Anchor pos: none")
+    end
+    table.insert(lines, string.format("Profile: %s", site.anchor_profile or (job and job.profile) or "none"))
+    table.insert(lines, string.format("Version: %s", tostring(site.anchor_version or "none")))
+    table.insert(lines, string.format("World seed: %s", tostring(site.anchor_world_seed or "none")))
+    if site.anchor_survey then
+      table.insert(lines, format_survey_summary(site.anchor_survey))
+    end
+    if job then
+      table.insert(lines, string.format("Job: %s checked=%d/%d steps=%d",
+        job.status or "unknown",
+        job.checked or 0,
+        job.candidates and #job.candidates or 0,
+        job.steps or 0))
+      if job.result and job.result.error then
+        table.insert(lines, "Job error: " .. job.result.error)
+      end
+    elseif site.anchor_debug then
+      table.insert(lines, string.format("Last attempt: %s checked=%s rejected=%s",
+        site.anchor_debug.error or site.anchor_debug.status or "unknown",
+        tostring(site.anchor_debug.checked or "0"),
+        tostring(site.anchor_debug.rejected_count or "0")))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_site_survey", {
+  params = "<x> <z>",
+  description = "Survey terrain at X/Z and report anchor metrics",
+  privs = {server = true},
+  func = function(_, param)
+    local x, z = (param or ""):match("^%s*(-?%d+)%s+(-?%d+)%s*$")
+    if not x or not z then
+      return false, "Usage: /aw_site_survey <x> <z>"
+    end
+    if not aliveworld.terrain or not aliveworld.terrain.survey then
+      return false, "Terrain survey API not loaded"
+    end
+    local survey = aliveworld.terrain.survey({x = tonumber(x), z = tonumber(z)}, {profile = "generic"})
+    local lines = {
+      "Survey: " .. (survey.ok and "ok" or "rejected"),
+      format_survey_summary(survey),
+    }
     return true, table.concat(lines, "\n")
   end,
 })

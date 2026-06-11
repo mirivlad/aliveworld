@@ -6,6 +6,9 @@ local storage = minetest.get_mod_storage()
 local SITES_KEY = "aliveworld_sites"
 
 local sites = {}
+local anchor_jobs = {}
+local anchor_job_timer = 0
+local unpack = table.unpack or unpack
 
 aliveworld.sites = {}
 
@@ -497,7 +500,46 @@ function aliveworld.sites.create_event_site(event)
   return true, site
 end
 
-function aliveworld.sites.anchor_site(site_id, anchor_pos, marker_id)
+local function copy_table(src)
+  local dst = {}
+  for k, v in pairs(src or {}) do
+    if type(v) == "table" then
+      dst[k] = copy_table(v)
+    else
+      dst[k] = v
+    end
+  end
+  return dst
+end
+
+local function current_day()
+  if aliveworld.get_day then
+    return aliveworld.get_day()
+  end
+  if aliveworld.get_time then
+    local t = aliveworld.get_time()
+    if type(t) == "table" then
+      return t.total_days or t.day
+    end
+  end
+  return nil
+end
+
+local function summarize_anchor_result(result)
+  if not result then return nil end
+  return {
+    error = result.error,
+    status = result.status,
+    profile = result.profile,
+    checked = result.checked,
+    duration_ms = result.duration_ms,
+    steps = result.steps,
+    rejected_count = result.rejected and #result.rejected or 0,
+    rejected = result.rejected and {unpack(result.rejected, 1, math.min(#result.rejected, 12))} or {},
+  }
+end
+
+function aliveworld.sites.anchor_site(site_id, anchor_pos, marker_id, meta)
   local site = sites[site_id]
   if not site then
     return false, "Site not found: " .. site_id
@@ -506,6 +548,14 @@ function aliveworld.sites.anchor_site(site_id, anchor_pos, marker_id)
   site.anchor_pos = anchor_pos or {x = site.pos.x, y = site.pos.y, z = site.pos.z}
   site.marker_id = marker_id
   site.discovered = true
+  if meta then
+    site.anchor_profile = meta.profile or site.anchor_profile
+    site.anchor_version = meta.version or site.anchor_version
+    site.anchor_world_seed = meta.world_seed or site.anchor_world_seed
+    site.anchor_day = meta.day or site.anchor_day
+    site.anchor_survey = meta.survey and copy_table(meta.survey) or site.anchor_survey
+    site.anchor_debug = summarize_anchor_result(meta.debug) or site.anchor_debug
+  end
   storage:set_string(SITES_KEY, minetest.write_json(sites))
   aliveworld.add_event("site_anchored",
     string.format("Site anchored: %s (%s) at %d,%d,%d",
@@ -514,6 +564,236 @@ function aliveworld.sites.anchor_site(site_id, anchor_pos, marker_id)
   )
   return true, site
 end
+
+function aliveworld.sites.anchor_site_terrain(site_id, opts)
+  opts = opts or {}
+  local site = aliveworld.sites.get(site_id)
+  if not site then
+    return false, {error = "site_not_found", site_id = site_id}
+  end
+  local phys = site.physical_status or "abstract"
+  if not opts.force and site.anchor_pos and (phys == "anchored" or phys == "materialized") then
+    return true, {
+      status = "already_anchored",
+      site_id = site.id,
+      anchor_pos = copy_table(site.anchor_pos),
+      profile = site.anchor_profile,
+      survey = copy_table(site.anchor_survey),
+      checked = 0,
+      duration_ms = 0,
+    }
+  end
+  if site.status ~= "active" then
+    return false, {error = "site_not_active", site_id = site.id}
+  end
+  if not aliveworld.terrain or not aliveworld.terrain.find_anchor then
+    return false, {error = "terrain_api_missing", site_id = site.id}
+  end
+
+  local ok, result = aliveworld.terrain.find_anchor(site, opts)
+  if not ok then
+    site.anchor_debug = summarize_anchor_result(result)
+    storage:set_string(SITES_KEY, minetest.write_json(sites))
+    return false, result
+  end
+
+  local meta = {
+    profile = result.profile,
+    version = aliveworld.terrain.ANCHOR_VERSION,
+    world_seed = aliveworld.terrain.get_world_seed and aliveworld.terrain.get_world_seed() or "",
+    day = current_day(),
+    survey = result.survey,
+    debug = result,
+  }
+  local saved, saved_site = aliveworld.sites.anchor_site(site.id, result.anchor_pos, nil, meta)
+  if not saved then
+    return false, {error = "save_failed", message = tostring(saved_site), site_id = site.id}
+  end
+  return true, {
+    status = "anchored",
+    site_id = saved_site.id,
+    anchor_pos = copy_table(saved_site.anchor_pos),
+    profile = saved_site.anchor_profile,
+    survey = copy_table(saved_site.anchor_survey),
+    checked = result.checked,
+    duration_ms = result.duration_ms,
+  }
+end
+
+local function finish_anchor_job(job, ok, result)
+  job.finished_us = minetest.get_us_time()
+  job.duration_ms = math.floor((job.finished_us - job.started_us) / 1000)
+  if ok then
+    job.status = "done"
+    job.result = result
+  else
+    job.status = "failed"
+    job.result = result
+  end
+end
+
+function aliveworld.sites.start_anchor_site(site_id, opts)
+  opts = opts or {}
+  local site = aliveworld.sites.get(site_id)
+  if not site then
+    return false, {error = "site_not_found", site_id = site_id}
+  end
+  local phys = site.physical_status or "abstract"
+  if not opts.force and site.anchor_pos and (phys == "anchored" or phys == "materialized") then
+    return true, {
+      status = "already_anchored",
+      site_id = site.id,
+      anchor_pos = copy_table(site.anchor_pos),
+      profile = site.anchor_profile or (aliveworld.terrain and aliveworld.terrain.profile_for_site and aliveworld.terrain.profile_for_site(site)) or "generic",
+      checked = 0,
+      steps = 0,
+      candidates = {},
+      result = {
+        status = "already_anchored",
+        anchor_pos = copy_table(site.anchor_pos),
+        survey = site.anchor_survey and copy_table(site.anchor_survey) or nil,
+      },
+    }
+  end
+  if anchor_jobs[site.id] and anchor_jobs[site.id].status == "running" then
+    return true, anchor_jobs[site.id]
+  end
+  local profile = opts.profile or (aliveworld.terrain and aliveworld.terrain.profile_for_site and aliveworld.terrain.profile_for_site(site)) or "generic"
+  local candidates = aliveworld.terrain.make_candidates(site.pos, site.id, opts)
+  local job = {
+    site_id = site.id,
+    status = "running",
+    profile = profile,
+    opts = copy_table(opts),
+    candidates = candidates,
+    index = 1,
+    checked = 0,
+    steps = 0,
+    rejected = {},
+    started_us = minetest.get_us_time(),
+    best = nil,
+  }
+  job.opts.profile = profile
+  anchor_jobs[site.id] = job
+  return true, job
+end
+
+function aliveworld.sites.get_anchor_job(site_id)
+  local site = aliveworld.sites.get(site_id)
+  return site and anchor_jobs[site.id] or anchor_jobs[site_id]
+end
+
+local function process_anchor_job(job)
+  if not job or job.status ~= "running" then return end
+  job.steps = (job.steps or 0) + 1
+  local per_step = job.opts.candidates_per_step or 4
+  local processed = 0
+  local profile = aliveworld.terrain.get_profile(job.profile, job.opts)
+
+  while processed < per_step and job.index <= #job.candidates do
+    local candidate = job.candidates[job.index]
+    job.index = job.index + 1
+    processed = processed + 1
+    job.checked = (job.checked or 0) + 1
+
+    local survey = aliveworld.terrain.survey(candidate, profile)
+    if survey.flags and survey.flags.area_not_loaded and (candidate.tries or 0) < 2 then
+      candidate.tries = (candidate.tries or 0) + 1
+      minetest.emerge_area(
+        {x = candidate.x - profile.sample_radius, y = profile.min_y or -64, z = candidate.z - profile.sample_radius},
+        {x = candidate.x + profile.sample_radius, y = profile.max_y or 160, z = candidate.z + profile.sample_radius}
+      )
+      table.insert(job.candidates, candidate)
+    elseif survey.ok then
+      if not job.best or survey.total_score > job.best.survey.total_score then
+        job.best = {
+          candidate = {x = candidate.x, y = candidate.y, z = candidate.z},
+          survey = survey,
+        }
+      end
+    else
+      table.insert(job.rejected, {
+        pos = {x = candidate.x, y = candidate.y, z = candidate.z},
+        score = survey.total_score or 0,
+        reasons = survey.rejections or {},
+      })
+    end
+  end
+
+  if job.index <= #job.candidates then
+    return
+  end
+
+  local site = aliveworld.sites.get(job.site_id)
+  if not site then
+    finish_anchor_job(job, false, {error = "site_not_found", site_id = job.site_id})
+    return
+  end
+  local phys = site.physical_status or "abstract"
+  if not job.opts.force and site.anchor_pos and (phys == "anchored" or phys == "materialized") then
+    finish_anchor_job(job, true, {
+      status = "already_anchored",
+      site_id = site.id,
+      profile = site.anchor_profile or job.profile,
+      anchor_pos = copy_table(site.anchor_pos),
+      survey = site.anchor_survey and copy_table(site.anchor_survey) or nil,
+      checked = job.checked,
+      steps = job.steps,
+      rejected = job.rejected,
+    })
+    return
+  end
+  if not job.best then
+    local result = {
+      error = "no_suitable_candidate",
+      profile = job.profile,
+      checked = job.checked,
+      steps = job.steps,
+      rejected = job.rejected,
+    }
+    site.anchor_debug = summarize_anchor_result(result)
+    storage:set_string(SITES_KEY, minetest.write_json(sites))
+    finish_anchor_job(job, false, result)
+    return
+  end
+
+  local result = {
+    status = "anchored",
+    site_id = site.id,
+    profile = job.profile,
+    anchor_pos = job.best.survey.pos,
+    survey = aliveworld.terrain.summarize_survey(job.best.survey),
+    checked = job.checked,
+    steps = job.steps,
+    rejected = job.rejected,
+  }
+  local meta = {
+    profile = result.profile,
+    version = aliveworld.terrain.ANCHOR_VERSION,
+    world_seed = aliveworld.terrain.get_world_seed and aliveworld.terrain.get_world_seed() or "",
+    day = current_day(),
+    survey = result.survey,
+    debug = result,
+  }
+  local ok, saved = aliveworld.sites.anchor_site(site.id, result.anchor_pos, nil, meta)
+  if not ok then
+    finish_anchor_job(job, false, {error = "save_failed", message = tostring(saved), site_id = site.id})
+    return
+  end
+  result.anchor_pos = copy_table(saved.anchor_pos)
+  finish_anchor_job(job, true, result)
+end
+
+minetest.register_globalstep(function(dtime)
+  anchor_job_timer = anchor_job_timer + dtime
+  if anchor_job_timer < 0.2 then return end
+  anchor_job_timer = 0
+  for _, job in pairs(anchor_jobs) do
+    if job.status == "running" then
+      process_anchor_job(job)
+    end
+  end
+end)
 
 function aliveworld.sites.get_physical_status(site_id)
   local site = sites[site_id]
@@ -531,6 +811,12 @@ function aliveworld.sites.get_anchor_info(site_id)
     physical_status = site.physical_status,
     anchor_pos = site.anchor_pos,
     marker_id = site.marker_id,
+    anchor_profile = site.anchor_profile,
+    anchor_version = site.anchor_version,
+    anchor_world_seed = site.anchor_world_seed,
+    anchor_day = site.anchor_day,
+    anchor_survey = site.anchor_survey and copy_table(site.anchor_survey) or nil,
+    anchor_debug = site.anchor_debug and copy_table(site.anchor_debug) or nil,
   }
 end
 

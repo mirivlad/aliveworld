@@ -119,6 +119,48 @@ local function auto_run()
 
 	minetest.log("action", "[aliveworld_test_suite] auto-run: waiting up to " .. MAX_WAIT .. "s for player '" .. player_name .. "'")
 
+	local function area_ready(center, radius)
+		radius = radius or 96
+		minetest.emerge_area(
+			{x = center.x - radius, y = center.y - 64, z = center.z - radius},
+			{x = center.x + radius, y = center.y + 96, z = center.z + radius}
+		)
+		local checks = {
+			{x = center.x, y = center.y, z = center.z},
+			{x = center.x, y = center.y - 1, z = center.z},
+			{x = center.x + 16, y = center.y, z = center.z},
+			{x = center.x - 16, y = center.y, z = center.z},
+			{x = center.x, y = center.y, z = center.z + 16},
+			{x = center.x, y = center.y, z = center.z - 16},
+		}
+		for _, check_pos in ipairs(checks) do
+			if minetest.get_node(check_pos).name == "ignore" then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function player_area_ready(player)
+		local pos = player and player:get_pos()
+		if not pos then return false end
+		local center = {
+			x = math.floor(pos.x + 0.5),
+			y = math.floor(pos.y + 0.5),
+			z = math.floor(pos.z + 0.5),
+		}
+		if not area_ready(center, 96) then
+			return false
+		end
+		if aliveworld and aliveworld.sites then
+			local site = aliveworld.sites.get("site_birch_ford")
+			if site and site.anchor_pos and not area_ready(site.anchor_pos, 32) then
+				return false
+			end
+		end
+		return true
+	end
+
 	local function check_and_run()
 		if tests_in_progress then
 			minetest.log("action", "[aliveworld_test_suite] auto-run: tests in progress, skipping check")
@@ -127,8 +169,15 @@ local function auto_run()
 		elapsed = elapsed + CHECK_INTERVAL
 		local player = minetest.get_player_by_name(player_name)
 		if player then
-			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' online, running tests")
-			run_all_tests(player_name)
+			if player_area_ready(player) then
+				minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' online and area ready, running tests")
+				run_all_tests(player_name)
+			elseif elapsed < MAX_WAIT then
+				minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' online, waiting for area emerge (" .. elapsed .. "s elapsed)")
+				minetest.after(CHECK_INTERVAL, check_and_run)
+			else
+				minetest.log("warning", "[aliveworld_test_suite] auto-run: player area not ready after " .. MAX_WAIT .. "s; not running full suite")
+			end
 		elseif elapsed < MAX_WAIT then
 			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found (" .. elapsed .. "s elapsed), retrying...")
 			minetest.after(CHECK_INTERVAL, check_and_run)
