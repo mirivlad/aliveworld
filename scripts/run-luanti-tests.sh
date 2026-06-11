@@ -44,9 +44,10 @@ echo "Server container '$CONTAINER_NAME' is running."
 echo ""
 
 # === Build command ===
-CMD="/ltk_${test_spec}"
 if [ "$test_spec" = "all" ]; then
     CMD="/ltk_all"
+else
+    CMD="/ltk_run $test_spec"
 fi
 if [ -n "$player" ]; then
     CMD="$CMD $player"

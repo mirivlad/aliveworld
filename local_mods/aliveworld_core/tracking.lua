@@ -17,7 +17,6 @@ function aliveworld.tracking.track_site(player_or_name, site_id, opts)
     resolved_site_id = nil,
     title = nil,
     target_pos = nil,
-    hud_id = nil,
     gps_enabled = false,
     precision = nil,
     physical_status = nil,
@@ -168,7 +167,6 @@ function aliveworld.tracking.get_active_track(player_or_name)
     title = t.title,
     has_arrived = arrival_ack[pname] and arrival_ack[pname][t.site_id] or false,
     site = site or t.site,
-    hud_id = t.hud_id,
   }
 end
 

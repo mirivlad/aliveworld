@@ -56,17 +56,55 @@ function ui.set_observer_pos(pos)
   state.observer_pos = pos
 end
 
-local function write_rc_command(cmd, params, player)
-  player = player or state.player_name
-  local data = minetest.write_json({command = cmd, params = params or "", player = player})
-  local f = io.open(worldpath .. "/rc_cmd.json", "w")
-  if f then
-    f:write(data)
-    f:close()
-    minetest.log("action", "[ui_state] rc_cmd: /" .. tostring(cmd) .. " " .. tostring(params) .. " as " .. player)
-  else
-    minetest.log("warning", "[ui_state] cannot write rc_cmd.json")
+local function restore_player_state(pos, site_id)
+  local player = minetest.get_player_by_name(state.player_name)
+  if not player then
+    return false, "player_not_online"
   end
+
+  if pos then
+    player:set_pos(pos)
+  end
+  player:set_hp(20)
+  player:set_breath(10)
+  player:set_velocity({x = 0, y = 0, z = 0})
+
+  if not aliveworld_player then
+    return false, "aliveworld_player_not_loaded"
+  end
+  if not aliveworld_player.radar or not aliveworld_player.radar.enable then
+    return false, "radar_not_loaded"
+  end
+
+  if site_id then
+    if not aliveworld or not aliveworld.sites or not aliveworld.sites.get then
+      return false, "sites_not_loaded"
+    end
+    if not aliveworld.sites.get(site_id) then
+      if aliveworld_player.tracking and aliveworld_player.tracking.untrack then
+        aliveworld_player.tracking.untrack(state.player_name)
+      end
+      return false, "site_not_found: " .. tostring(site_id)
+    end
+  end
+
+  local gps_ok, gps_msg = aliveworld_player.radar.enable(state.player_name)
+  if not gps_ok then
+    return false, "gps_enable_failed: " .. tostring(gps_msg)
+  end
+
+  if site_id then
+    if not aliveworld_player.tracking or not aliveworld_player.tracking.track_site then
+      return false, "tracking_not_loaded"
+    end
+    local track_ok, track_msg = aliveworld_player.tracking.track_site(state.player_name, site_id)
+    if not track_ok then
+      aliveworld_player.tracking.untrack(state.player_name)
+      return false, "track_failed: " .. tostring(track_msg)
+    end
+  end
+
+  return true, "restored"
 end
 
 local function write_restart_signal(reason)
@@ -114,35 +152,13 @@ function ui.ensure_clean_world_view()
 end
 
 function ui.restore_state_via_rc()
-  minetest.log("action", "[ui_state] restoring state via remote controller")
-  local ok_count = 0
-  local fail_count = 0
-
-  write_rc_command("teleport", "", state.player_name)
-  local player_obj = minetest.get_player_by_name(state.player_name)
-  if player_obj then
-    player_obj:set_pos(state.observer_pos)
-    ok_count = ok_count + 1
-  end
-
-  minetest.after(0.5, function()
-    write_rc_command("aw_gps", "on", state.player_name)
-  end)
-
-  minetest.after(1.0, function()
-    write_rc_command("aw_track", "site_birch_ford", state.player_name)
-  end)
-
-  minetest.after(1.5, function()
-    write_rc_command("aw_gps_debug", "", state.player_name)
-  end)
-
-  minetest.after(3.0, function()
+  minetest.log("action", "[ui_state] restoring state directly on server")
+  local ok, msg = restore_player_state(state.observer_pos, "site_birch_ford")
+  if ok then
     state.restored_count = state.restored_count + 1
-    minetest.log("action", "[ui_state] state restore sequence complete")
-  end)
-
-  return true, "restore_started"
+  end
+  minetest.log("action", "[ui_state] state restore result: " .. tostring(ok) .. " " .. tostring(msg))
+  return ok, msg
 end
 
 function ui.get_restart_signal()
@@ -429,20 +445,16 @@ function ui.prepare_for_screenshot(target_site_id)
   if needs_teleport then
 
     minetest.log("action", "[ui_state] teleporting to safe pos (" .. safe_pos.x .. "," .. safe_pos.y .. "," .. safe_pos.z .. ") reason=" .. teleport_reason)
-    write_rc_command("teleport", "", state.player_name)
-    player:set_pos(safe_pos)
-    player:set_hp(20)
-    player:set_breath(10)
-    player:set_velocity({x = 0, y = 0, z = 0})
-
-    -- Enable GPS and tracking directly
-    if aliveworld_player then
-      if aliveworld_player.radar and aliveworld_player.radar.enable then
-        aliveworld_player.radar.enable(state.player_name)
-      end
-      if aliveworld_player.tracking and aliveworld_player.tracking.track_site then
-        aliveworld_player.tracking.track_site(state.player_name, target_site_id)
-      end
+    local restore_ok, restore_msg = restore_player_state(safe_pos, target_site_id)
+    if not restore_ok then
+      minetest.log("error", "[ui_state] restore failed: " .. tostring(restore_msg))
+      return {error = restore_msg}
+    end
+  else
+    local restore_ok, restore_msg = restore_player_state(safe_pos, target_site_id)
+    if not restore_ok then
+      minetest.log("error", "[ui_state] restore failed: " .. tostring(restore_msg))
+      return {error = restore_msg}
     end
   end
 
@@ -499,28 +511,41 @@ function ui.prepare_for_screenshot(target_site_id)
   -- Collect GPS/track state
   local gps_enabled = false
   local tracks = {}
+  local radar_result = nil
   local radar_points = {}
+  local radar_points_count = nil
   if aliveworld_player then
     if aliveworld_player.radar then
       gps_enabled = aliveworld_player.radar.is_enabled and aliveworld_player.radar.is_enabled(state.player_name) or false
       if aliveworld_player.radar.get_points_for_player then
-        radar_points = aliveworld_player.radar.get_points_for_player(state.player_name) or {}
+        radar_result = aliveworld_player.radar.get_points_for_player(state.player_name)
+        if not radar_result or type(radar_result) ~= "table" then
+          return {error = "radar_points_api_invalid_result"}
+        end
+        radar_points = radar_result.points or {}
+        radar_points_count = radar_result.count or #radar_points
+      else
+        return {error = "radar_points_api_missing"}
       end
+    else
+      return {error = "radar_not_loaded"}
     end
     if aliveworld_player.tracking then
       tracks = aliveworld_player.tracking.list and aliveworld_player.tracking.list(state.player_name) or {}
     end
+  else
+    return {error = "aliveworld_player_not_loaded"}
   end
 
-  local waypoint_hud_id = nil
+  local tracking_hud_id = nil
   local active_tracks_count = #tracks
   if #tracks > 0 then
-    waypoint_hud_id = tracks[1].hud_id
+    tracking_hud_id = tracks[1].tracking_hud_id
   end
 
   local visual_expectation = {"clean_world", "hud", "radar"}
-  if waypoint_hud_id then
-    table.insert(visual_expectation, "waypoint")
+  if active_tracks_count > 0 then
+    table.insert(visual_expectation, "tracked_target")
   end
 
   local result = {
@@ -535,8 +560,12 @@ function ui.prepare_for_screenshot(target_site_id)
     hostile_mobs_nearby = hostile_count,
     gps_enabled = gps_enabled,
     active_tracks_count = active_tracks_count,
-    waypoint_hud_id = waypoint_hud_id,
-    radar_points_count = #radar_points,
+    tracking_hud_id = tracking_hud_id,
+    -- Compatibility alias for older screenshot metadata consumers. This value is
+    -- the text tracking HUD id, not a removed 3D waypoint HUD id.
+    waypoint_hud_id = tracking_hud_id,
+    radar_points_count = radar_points_count,
+    radar_points = radar_points,
     visual_expectation = visual_expectation,
     needs_teleport = needs_teleport,
     teleport_reason = teleport_reason,

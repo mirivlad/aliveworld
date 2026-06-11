@@ -133,9 +133,7 @@ local function auto_run()
 			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found (" .. elapsed .. "s elapsed), retrying...")
 			minetest.after(CHECK_INTERVAL, check_and_run)
 		else
-			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found after " .. MAX_WAIT .. "s, running tests anyway")
-			ensure_sites()
-			run_all_tests(player_name)
+			minetest.log("warning", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found after " .. MAX_WAIT .. "s; not running client-dependent full suite")
 		end
 	end
 

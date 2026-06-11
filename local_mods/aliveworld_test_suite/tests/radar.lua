@@ -76,19 +76,29 @@ T.register_test("aliveworld", "radar_enable_disable", function(ctx)
 	end
 end)
 
-T.register_test("aliveworld", "radar_texture_exists", function(ctx)
+T.register_test("aliveworld", "radar_marker_textures_exist", function(ctx)
 	if not aliveworld_player then
-		ctx.skip("aliveworld_player not loaded")
+		ctx.assert.not_nil(aliveworld_player, "aliveworld_player must be loaded")
 		return
 	end
 	local modpath = minetest.get_modpath("aliveworld_player")
 	if not modpath then
-		ctx.skip("aliveworld_player modpath not found")
+		ctx.assert.not_nil(modpath, "aliveworld_player modpath must exist")
 		return
 	end
-	local tex_path = modpath .. "/textures/aliveworld_radar_bg.png"
-	-- Can't check file existence in Lua directly, skip
-	ctx.log("Radar textures should be in aliveworld_player/textures/")
+	for _, name in ipairs({
+		"aliveworld_gps.png",
+		"aliveworld_radar_player.png",
+		"aliveworld_radar_target.png",
+		"aliveworld_radar_arrow.png",
+	}) do
+		local tex_path = modpath .. "/textures/" .. name
+		local f = io.open(tex_path, "rb")
+		ctx.assert.not_nil(f, "radar texture must exist: " .. name)
+		if f then
+			f:close()
+		end
+	end
 end)
 
 T.register_test("aliveworld", "aw_gps_chatcommand", function(ctx)

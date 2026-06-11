@@ -983,7 +983,7 @@ minetest.register_chatcommand("aw_tracks", {
       return false, "Tracking module not loaded."
     end
     local desc = aliveworld.tracking.describe_track(player_name)
-    return true, desc
+    return desc.ok ~= false, desc.line or "Нет активного waypoint."
   end,
 })
 
@@ -1002,19 +1002,25 @@ minetest.register_chatcommand("aw_track_debug", {
     if not debug then
       return false, "No active track for " .. param
     end
+    local track = debug.active_track
     local lines = {}
-    table.insert(lines, string.format("Player: %s", debug.player_name))
-    table.insert(lines, string.format("Tracked site: %s", debug.site_id))
-    table.insert(lines, string.format("Title: %s", debug.title))
-    if debug.target_pos then
-      table.insert(lines, string.format("Target pos: (%d,%d,%d)", debug.target_pos.x, debug.target_pos.y, debug.target_pos.z))
+    table.insert(lines, string.format("Player: %s", debug.player_name or param))
+    table.insert(lines, string.format("GPS enabled: %s", tostring(debug.gps_enabled)))
+    table.insert(lines, string.format("Has track: %s", tostring(debug.has_track)))
+    if not track then
+      table.insert(lines, "Tracked site: none")
+      return true, table.concat(lines, "\n")
     end
-    table.insert(lines, string.format("Precision: %s", debug.precision))
-    table.insert(lines, string.format("Physical status: %s", debug.physical_status))
-    table.insert(lines, string.format("Has arrived: %s", tostring(debug.has_arrived)))
-    table.insert(lines, string.format("Arrival ack: %s", tostring(debug.has_arrival_ack)))
+    table.insert(lines, string.format("Tracked site: %s", track.site_id or "none"))
+    table.insert(lines, string.format("Title: %s", track.title or "none"))
+    if track.target_pos then
+      table.insert(lines, string.format("Target pos: (%d,%d,%d)", track.target_pos.x, track.target_pos.y, track.target_pos.z))
+    end
+    table.insert(lines, string.format("Precision: %s", track.precision or "unknown"))
+    table.insert(lines, string.format("Physical status: %s", track.physical_status or "unknown"))
+    table.insert(lines, string.format("Has arrived: %s", tostring(track.has_arrived)))
+    table.insert(lines, string.format("Arrival ack: %s", tostring(debug.arrival_ack and track.site_id and debug.arrival_ack[track.site_id] or false)))
     -- Show site details
-    local track = aliveworld.tracking.get_active_track(param)
     if track and track.site then
       local site = track.site
       table.insert(lines, string.format("Site name: %s", site.name_en or site.name))

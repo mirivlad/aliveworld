@@ -27,7 +27,12 @@ T.register_test("aliveworld", "set_and_get_player_status", function(ctx)
     ctx.skip("aliveworld.rumors not loaded")
     return
   end
-  local test_rumor = "test_rumor_" .. tostring(math.random(10000, 99999))
+  local player = ctx.helpers.get_player(ctx.player_name)
+  if not player then
+    ctx.skip("Player '" .. ctx.player_name .. "' is not online.")
+    return
+  end
+  local test_rumor = "test_rumor_" .. tostring(minetest.get_us_time()) .. "_" .. tostring(math.random(10000, 99999))
 
   local before = aliveworld.rumors.get_player_status(ctx.player_name, test_rumor)
   ctx.assert.equal("new", before, "initial status must be 'new'")

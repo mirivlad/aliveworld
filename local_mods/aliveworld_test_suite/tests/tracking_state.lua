@@ -125,13 +125,22 @@ T.register_test("aliveworld", "get_debug_info_structure", function(ctx)
     ctx.skip("aliveworld.tracking not loaded")
     return
   end
+  local player = ctx.helpers.get_player(ctx.player_name)
+  if not player then
+    ctx.skip("Player '" .. ctx.player_name .. "' is not online.")
+    return
+  end
   -- Track a site first so get_debug_info has full data
   aliveworld.tracking.untrack(ctx.player_name)
   local available = false
   if aliveworld.sites then
     local site = aliveworld.sites.get("site_birch_ford")
     if site then
-      aliveworld.tracking.track_site(ctx.player_name, "site_birch_ford")
+      local result = aliveworld.tracking.track_site(ctx.player_name, "site_birch_ford")
+      if not result.ok then
+        ctx.skip("track_site failed: " .. tostring(result.error))
+        return
+      end
       available = true
     end
   end

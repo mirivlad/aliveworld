@@ -252,7 +252,7 @@ take_screenshot() {
       rm -f "$SIGNAL_FILE"
       if [ "$signal_action" = "restart_awbot_client" ]; then
         log "prepare_shot: restart signaled ($signal_reason), restarting"
-        restart_client "$reason"
+        restart_client "$signal_reason"
         sleep 3
       elif [ "$signal_action" = "tests_complete" ]; then
         log "prepare_shot: tests already complete, proceeding"
@@ -316,8 +316,11 @@ meta = {
   'hostile_mobs_nearby': d.get('hostile_mobs_nearby', 0),
   'gps_enabled': d.get('gps_enabled', False),
   'active_tracks_count': d.get('active_tracks_count', 0),
+  'tracking_hud_id': d.get('tracking_hud_id'),
+  # Compatibility alias for older metadata consumers; not a 3D waypoint HUD.
   'waypoint_hud_id': d.get('waypoint_hud_id'),
   'radar_points_count': d.get('radar_points_count', 0),
+  'radar_points': d.get('radar_points', []),
   'visual_expectation': d.get('visual_expectation', []),
   'path': os.environ.get('META_PATH', ''),
 }

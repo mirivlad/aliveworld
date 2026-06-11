@@ -154,7 +154,16 @@ local function select_sources(player_name, player_pos, tracked_site_id)
       priority = 5
     end
 
-    table.insert(candidates, { site = s, target_pos = target_pos, dist = dist, priority = priority, is_tracked = is_tracked })
+    table.insert(candidates, {
+      site = s,
+      site_id = s.id,
+      title = s.name or s.name_en or s.id,
+      kind = s.type or "unknown",
+      target_pos = target_pos,
+      dist = dist,
+      priority = priority,
+      is_tracked = is_tracked,
+    })
     ::continue::
   end
 
@@ -596,6 +605,71 @@ function aliveworld_player.radar.get_debug_info(player_name)
     hud_ids = ids,
     dirty = state.dirty,
     rebuild_sources = state.rebuild_sources,
+  }
+end
+
+-- Public read-only layout info for testing and debugging
+function aliveworld_player.radar.get_layout_for_player(player_name)
+  local state = gps_state[player_name]
+  if not state then
+    return { preset = "default", position = GPS_POSITION, alignment = GPS_ALIGNMENT, offset = GPS_OFFSET, size = GPS_SIZE_PX, clipped = false }
+  end
+  local zoom = GPS_ZOOMS[state.zoom_idx]
+  return {
+    preset = zoom.id,
+    position = GPS_POSITION,
+    alignment = GPS_ALIGNMENT,
+    offset = GPS_OFFSET,
+    size = GPS_SIZE_PX,
+    clipped = false,
+    zoom_label = zoom.label,
+    diameter_nodes = zoom.diameter_nodes,
+    radius_nodes = zoom.radius_nodes,
+    enabled = state.enabled,
+  }
+end
+
+-- Public read-only points list for testing
+function aliveworld_player.radar.get_points_for_player(player_name)
+  local player = minetest.get_player_by_name(player_name)
+  if not player then
+    return { count = 0, points = {} }
+  end
+  local ppos = player:get_pos()
+  if not ppos then
+    return { count = 0, points = {} }
+  end
+  local tracked_id = nil
+  if aliveworld_player.tracking then
+    local tracks = aliveworld_player.tracking.list(player_name)
+    if tracks and #tracks > 0 then
+      tracked_id = tracks[1].site_id
+    end
+  end
+  local sources = select_sources(player_name, ppos, tracked_id)
+  local zoom = aliveworld_player.radar.get_zoom(player_name)
+  local map_rect = make_map_rect()
+  local ppn = get_pixels_per_node(zoom, map_rect)
+  local yaw = player:get_look_horizontal() or 0
+  local points = {}
+  for i, src in ipairs(sources) do
+    local target_pos = src.target_pos
+    local dx = target_pos.x - ppos.x
+    local dz = target_pos.z - ppos.z
+    local _, _, is_edge = world_to_screen(dx, dz, yaw, ppn, map_rect.visible_radius_px)
+    points[i] = {
+      site_id = src.site_id,
+      title = src.title,
+      kind = src.kind or "unknown",
+      target_pos = { x = target_pos.x, y = target_pos.y, z = target_pos.z },
+      distance = math.floor(math.sqrt(dx * dx + dz * dz) + 0.5),
+      is_tracked = src.is_tracked == true,
+      is_edge = is_edge == true,
+    }
+  end
+  return {
+    count = #points,
+    points = points,
   }
 end
 

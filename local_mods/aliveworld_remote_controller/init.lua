@@ -2,6 +2,9 @@
 -- Acts as a remote control for AliveWorld.
 -- Polls a JSON file in the worldpath and executes commands.
 -- To trigger: write JSON to /config/.minetest/worlds/aliveworld/rc_cmd.json
+-- Supported external command formats:
+--   {"command":"teleport","pos":{"x":0,"y":4,"z":0},"player":"awbot"}
+--   {"command":"runchat","chatcmd":"aw_gps","params":"on","player":"awbot"}
 
 local worldpath = minetest.get_worldpath()
 local rc_file = worldpath .. "/rc_cmd.json"

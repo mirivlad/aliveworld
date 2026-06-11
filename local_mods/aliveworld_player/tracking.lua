@@ -158,6 +158,10 @@ function aliveworld_player.tracking.list(player_name)
     precision = track.precision,
     target_pos = track.target_pos,
     has_arrived = track.has_arrived,
+    tracking_hud_id = info_hud_ids[player_name],
+    -- Compatibility alias for older screenshot/test metadata. This is the text
+    -- tracking HUD id, not a removed 3D waypoint; remove after consumers migrate.
+    hud_id = info_hud_ids[player_name],
   }}
 end
 

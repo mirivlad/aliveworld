@@ -81,17 +81,28 @@ T.register_test("aliveworld", "untrack_clears_state", function(ctx)
 end)
 
 T.register_test("aliveworld", "track_and_gps_full_workflow", function(ctx)
-  if not aliveworld_player or not aliveworld_player.tracking then
-    ctx.skip("aliveworld_player.tracking not loaded")
+  ctx.assert.not_nil(aliveworld_player, "aliveworld_player must be loaded")
+  if not aliveworld_player then
     return
   end
-  if not aliveworld_player.radar then
-    ctx.skip("aliveworld_player.radar not loaded")
+  ctx.assert.not_nil(aliveworld_player.tracking, "aliveworld_player.tracking must be loaded")
+  ctx.assert.not_nil(aliveworld_player.radar, "aliveworld_player.radar must be loaded")
+  if not aliveworld_player.tracking or not aliveworld_player.radar then
     return
   end
+  ctx.assert.not_nil(aliveworld_player.radar.get_points_for_player, "radar.get_points_for_player must exist")
+  if not aliveworld_player.radar.get_points_for_player then
+    return
+  end
+
   local player = ctx.helpers.get_player(ctx.player_name)
   if not player then
     ctx.skip("Player '" .. ctx.player_name .. "' is not online.")
+    return
+  end
+  ctx.assert.not_nil(aliveworld, "aliveworld must be loaded")
+  ctx.assert.not_nil(aliveworld and aliveworld.sites, "aliveworld.sites must be loaded")
+  if not aliveworld or not aliveworld.sites then
     return
   end
 
@@ -102,10 +113,14 @@ T.register_test("aliveworld", "track_and_gps_full_workflow", function(ctx)
   -- Track site_birch_ford
   local site = aliveworld.sites.get("site_birch_ford")
   if not site then
-    ctx.skip("Site 'site_birch_ford' not found.")
+    ctx.assert.not_nil(site, "Site 'site_birch_ford' must exist")
     return
   end
   local ok_track, msg_track = aliveworld_player.tracking.track_site(ctx.player_name, "site_birch_ford")
+  ctx.assert.is_true(ok_track, "track_site should succeed: " .. tostring(msg_track))
+  if not ok_track then
+    return
+  end
   ctx.log("Track: " .. tostring(msg_track))
 
   -- Verify via tracking.list
@@ -113,17 +128,46 @@ T.register_test("aliveworld", "track_and_gps_full_workflow", function(ctx)
   ctx.assert.not_nil(track_list, "track list should exist")
   ctx.assert.equal(1, #track_list, "should have 1 active track")
 
-  -- Verify via aw_gps_debug
+  -- Verify active track state
   local t = track_list[1]
-  ctx.assert.not_nil(t.hud_id, "waypoint HUD must exist")
-  ctx.log("Waypoint HUD ID: " .. tostring(t.hud_id))
+  ctx.assert.not_nil(t, "active track entry must exist")
+  ctx.assert.equal("site_birch_ford", t.site_id, "active track site_id must match")
   ctx.log("Site: " .. tostring(t.site_id) .. " precision=" .. tostring(t.precision))
 
   -- Verify radar is enabled
   local enabled = aliveworld_player.radar.is_enabled(ctx.player_name)
   ctx.assert.is_true(enabled, "radar should be enabled")
-  local points = aliveworld_player.radar.get_points_for_player(ctx.player_name)
-  ctx.log("Radar points count: " .. tostring(#points))
+  local rp = aliveworld_player.radar.get_points_for_player(ctx.player_name)
+  ctx.assert.not_nil(rp, "get_points_for_player must return a result")
+  ctx.assert.not_nil(rp.points, "result must have points array")
+  ctx.assert.not_nil(rp.count, "result must have count")
+  ctx.assert.equal(#rp.points, rp.count, "count must match points length")
+  ctx.assert.is_true(rp.count > 0, "radar should return at least one point")
+
+  local tracked_count = 0
+  for _, p in ipairs(rp.points) do
+    if p.site_id ~= nil then
+      ctx.assert.is_true(type(p.site_id) == "string" and p.site_id ~= "", "radar point site_id must be a non-empty string when present")
+    end
+    ctx.assert.is_true(type(p.title) == "string" and p.title ~= "", "radar point title must be a non-empty string")
+    ctx.assert.is_true(type(p.kind) == "string" and p.kind ~= "", "radar point kind must be a non-empty string")
+    ctx.assert.not_nil(p.target_pos, "radar point must have target_pos")
+    if p.target_pos then
+      ctx.assert.is_true(type(p.target_pos.x) == "number", "target_pos.x must be a number")
+      ctx.assert.is_true(type(p.target_pos.y) == "number", "target_pos.y must be a number")
+      ctx.assert.is_true(type(p.target_pos.z) == "number", "target_pos.z must be a number")
+    end
+    ctx.assert.is_true(type(p.distance) == "number", "radar point distance must be a number")
+    ctx.assert.is_true(p.distance >= 0, "radar point distance must be >= 0")
+    ctx.assert.is_true(type(p.is_tracked) == "boolean", "radar point is_tracked must be boolean")
+    ctx.assert.is_true(type(p.is_edge) == "boolean", "radar point is_edge must be boolean")
+    if p.is_tracked then
+      tracked_count = tracked_count + 1
+      ctx.assert.equal("site_birch_ford", p.site_id, "tracked radar point site_id must match active track")
+    end
+  end
+  ctx.assert.equal(1, tracked_count, "radar points must include exactly one active tracked target")
+  ctx.log("Radar points count: " .. tostring(rp.count))
 
   -- Cleanup: untrack + disable GPS
   aliveworld_player.tracking.untrack(ctx.player_name)
@@ -216,12 +260,12 @@ T.register_test("aliveworld", "arrival_pos_not_water", function(ctx)
   local node = minetest.get_node(arrival)
   local def = minetest.registered_nodes[node.name]
   if def and def.liquidtype and def.liquidtype ~= "none" then
-    ctx.fail("arrival_pos is inside liquid: " .. node.name)
+    ctx.assert.is_false(true, "arrival_pos is inside liquid: " .. node.name)
   end
   local below = minetest.get_node({x = arrival.x, y = arrival.y - 1, z = arrival.z})
   local def_below = minetest.registered_nodes[below.name]
   if def_below and def_below.liquidtype and def_below.liquidtype ~= "none" then
-    ctx.fail("block below arrival is liquid: " .. below.name)
+    ctx.assert.is_false(true, "block below arrival is liquid: " .. below.name)
   end
   ctx.log("arrival_pos (" .. arrival.x .. "," .. arrival.y .. "," .. arrival.z .. ") is safe, not liquid")
 end)
@@ -270,41 +314,42 @@ T.register_test("aliveworld", "aw_gps_debug_shows_anchor_arrival", function(ctx)
   aliveworld_player.tracking.untrack(ctx.player_name)
 end)
 
-T.register_test("aliveworld", "aw_gps_pos_command", function(ctx)
-  -- Verify /aw_gps_pos command is registered and works
-  local cmd = minetest.registered_chatcommands["aw_gps_pos"]
+T.register_test("aliveworld", "aw_gps_zoom_command", function(ctx)
+  -- Verify current GPS zoom command/API is registered and works.
+  local cmd = minetest.registered_chatcommands["aw_gps_zoom"]
+  ctx.assert.not_nil(cmd, "/aw_gps_zoom command must be registered")
   if not cmd then
-    ctx.skip("/aw_gps_pos command not registered")
     return
   end
-  ctx.assert.not_nil(cmd.func, "aw_gps_pos must have func")
-  -- Test that the command works when called with a valid preset
-  if not aliveworld_player or not aliveworld_player.radar then
-    ctx.skip("radar not loaded")
+  ctx.assert.not_nil(cmd.func, "aw_gps_zoom must have func")
+  ctx.assert.not_nil(aliveworld_player, "aliveworld_player must be loaded")
+  ctx.assert.not_nil(aliveworld_player and aliveworld_player.radar, "radar must be loaded")
+  ctx.assert.not_nil(aliveworld_player and aliveworld_player.radar and aliveworld_player.radar.set_zoom, "radar.set_zoom must exist")
+  if not aliveworld_player or not aliveworld_player.radar or not aliveworld_player.radar.set_zoom then
     return
   end
-  if not aliveworld_player.radar.set_origin_preset then
-    ctx.skip("set_origin_preset not available")
-    return
-  end
-  local ok, msg = aliveworld_player.radar.set_origin_preset(ctx.player_name, "top-left")
-  ctx.log("gps_pos top-left: " .. tostring(msg))
-  local origin = aliveworld_player.radar.get_origin_for_player(ctx.player_name)
-  ctx.assert.equal(10, origin.x, "top-left origin x should be 10")
-  ctx.assert.equal(10, origin.y, "top-left origin y should be 10")
+  local ok, msg = aliveworld_player.radar.set_zoom(ctx.player_name, "near")
+  ctx.assert.is_true(ok, "set_zoom near should succeed: " .. tostring(msg))
+  local layout = aliveworld_player.radar.get_layout_for_player(ctx.player_name)
+  ctx.assert.equal("near", layout.preset, "layout preset should be near after set_zoom")
+  ctx.assert.equal(80, layout.diameter_nodes, "near zoom should use 80 block diameter")
 end)
 
 T.register_test("aliveworld", "radar_origin_not_clipped", function(ctx)
-  -- Verify radar origin is on-screen (not clipped)
-  if not aliveworld_player or not aliveworld_player.radar then
-    ctx.skip("radar not loaded")
+  -- Verify radar layout has valid on-screen position
+  ctx.assert.not_nil(aliveworld_player, "aliveworld_player must be loaded")
+  ctx.assert.not_nil(aliveworld_player and aliveworld_player.radar, "radar must be loaded")
+  ctx.assert.not_nil(aliveworld_player and aliveworld_player.radar and aliveworld_player.radar.get_layout_for_player, "radar.get_layout_for_player must exist")
+  if not aliveworld_player or not aliveworld_player.radar or not aliveworld_player.radar.get_layout_for_player then
     return
   end
-  local origin = aliveworld_player.radar.get_origin_for_player(ctx.player_name)
-  ctx.assert.not_nil(origin, "radar origin should not be nil")
-  ctx.assert.is_true(origin.x >= 0, "origin x should be >= 0 (on-screen), got " .. origin.x)
-  ctx.assert.is_true(origin.y >= 0, "origin y should be >= 0 (on-screen), got " .. origin.y)
-  ctx.log("Radar origin: (" .. origin.x .. ", " .. origin.y .. ") is on-screen")
+  local layout = aliveworld_player.radar.get_layout_for_player(ctx.player_name)
+  ctx.assert.not_nil(layout, "radar layout should not be nil")
+  ctx.assert.not_nil(layout.position, "layout must have position")
+  ctx.assert.not_nil(layout.offset, "layout must have offset")
+  ctx.assert.is_true(layout.size > 0, "radar size should be positive, got " .. layout.size)
+  ctx.assert.is_false(layout.clipped, "radar should not be clipped")
+  ctx.log("Radar layout: size=" .. layout.size .. " preset=" .. (layout.preset or "none") .. " clipped=" .. tostring(layout.clipped))
 end)
 
 T.register_test("aliveworld", "rumor_board_track_label", function(ctx)

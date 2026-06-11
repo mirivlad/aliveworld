@@ -473,28 +473,18 @@ if ! grep -q 'register_craftitem("aliveworld_player:gps"' "$ROOT/local_mods/aliv
   exit 1
 fi
 
-if ! grep -q 'hud_elem_type = "waypoint"' "$ROOT/local_mods/aliveworld_player/tracking.lua"; then
-  echo "tracking.lua must use hud_elem_type waypoint"
-  exit 1
-fi
-
 if ! grep -q "aliveworld_gps.png" "$ROOT/local_mods/aliveworld_player/init.lua"; then
   echo "aliveworld_player must reference aliveworld_gps.png"
   exit 1
 fi
 
-if ! grep -q "aliveworld_radar_bg.png" "$ROOT/local_mods/aliveworld_player/radar.lua"; then
-  echo "radar.lua must reference aliveworld_radar_bg.png"
+if ! grep -q "get_points_for_player" "$ROOT/local_mods/aliveworld_player/radar.lua"; then
+  echo "radar.lua must expose get_points_for_player"
   exit 1
 fi
 
 if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_gps.png" ]; then
   echo "aliveworld_player must have aliveworld_gps.png texture"
-  exit 1
-fi
-
-if ! [ -f "$ROOT/local_mods/aliveworld_player/textures/aliveworld_radar_bg.png" ]; then
-  echo "aliveworld_player must have aliveworld_radar_bg.png texture"
   exit 1
 fi
 
