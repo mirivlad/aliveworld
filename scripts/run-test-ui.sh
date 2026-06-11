@@ -393,7 +393,6 @@ case "$cmd" in
     ;;
   status)
     if [ -f "$PID_FILE" ]; then
-      local pid
       pid=$(cat "$PID_FILE")
       if kill -0 "$pid" 2>/dev/null; then
         echo "awbot running (PID $pid)"
