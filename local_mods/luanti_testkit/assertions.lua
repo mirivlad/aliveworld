@@ -36,6 +36,15 @@ local function make_assertions(report_callback)
 		end
 	end
 
+	function A.is_nil(value, message)
+		if value ~= nil then
+			local msg = string.format("%s: expected nil, got %s",
+				message or "assert.is_nil",
+				tostring(value))
+			report_callback("FAIL", msg)
+		end
+	end
+
 	function A.near(actual, expected, tolerance, message)
 		tolerance = tolerance or 0.001
 		if math.abs(actual - expected) > tolerance then
