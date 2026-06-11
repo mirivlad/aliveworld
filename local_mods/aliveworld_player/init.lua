@@ -1267,40 +1267,38 @@ minetest.register_chatcommand("aw_gps_testpattern", {
         cy = math.floor(map_rect.center_off_y + 0.5)
       end
 
-      -- Test points at 50px radius (simulating GPS coordinates with yaw=0)
+      -- Test points using the same math as world_to_screen
       local player_yaw = player:get_look_horizontal() or 0
-      local cos_y = math.cos(-player_yaw)
-      local sin_y = math.sin(-player_yaw)
+      local c = math.cos(player_yaw)
+      local s = math.sin(player_yaw)
       local test_world = {
-        {name="FRONT", dx=0, dz=-80, color=0xFF0000},  -- north (forward)
-        {name="RIGHT", dx=80, dz=0, color=0x00FF00},    -- east (right)
-        {name="BACK",  dx=0, dz=80, color=0x0000FF},     -- south (back)
-        {name="LEFT",  dx=-80, dz=0, color=0xFFFF00},    -- west (left)
-        {name="CENTER", dx=0, dz=0, color=0xFFFFFF},     -- player position
+        {name="FRONT", dx=0, dz=80, color=0xFF0000},   -- ahead (south at yaw=0)
+        {name="RIGHT", dx=80, dz=0, color=0x00FF00},    -- right (east at yaw=0)
+        {name="BACK",  dx=0, dz=-80, color=0x0000FF},   -- behind (north at yaw=0)
+        {name="LEFT",  dx=-80, dz=0, color=0xFFFF00},   -- left (west at yaw=0)
+        {name="CENTER", dx=0, dz=0, color=0xFFFFFF},    -- player position
       }
 
       -- Scale: assume 200px / 200 blocks (medium zoom)
       local ppn = 200 / 200
 
       for _, pt in ipairs(test_world) do
-        -- Apply yaw rotation to world offsets
-        local rx = pt.dx * cos_y - pt.dz * sin_y
-        local rz = pt.dx * sin_y + pt.dz * cos_y
-        local px = -rx * ppn  -- negate because minimap rotates opposite direction
-        local py = rz * ppn
+        -- Same formula as world_to_screen
+        local px = (pt.dx * c + pt.dz * s) * ppn
+        local py = (pt.dx * s - pt.dz * c) * ppn
 
         local id = player:hud_add({
           hud_elem_type = "image",
           position = {x = 1, y = 0},
           alignment = {x = 0.5, y = 0.5},
-          offset = {x = cx + px, y = cy - py},
+          offset = {x = cx + px, y = cy + py},
           text = "aliveworld_radar_target.png",
           scale = {x = 1, y = 1},
           z_index = 10,
         })
         table.insert(test_pattern_active[player_name].huds, id)
       end
-      return true, "Test pattern: FRONT(красный) RIGHT(зелёный) BACK(синий) LEFT(жёлтый) CENTER(белый)."
+      return true, "Test pattern: FRONT(крас) RIGHT(зел) BACK(син) LEFT(жёлт) CENTER(бел). Поворот проверяет вращение."
     elseif param == "off" then
       local t = test_pattern_active[player_name]
       if t and t.huds then

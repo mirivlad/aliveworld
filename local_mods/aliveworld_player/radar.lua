@@ -98,30 +98,30 @@ local function build_minimap_modes()
   return modes
 end
 
--- World -> screen projection with yaw rotation (assumes round minimap)
+-- World ➔ screen projection with yaw rotation (round minimap).
+-- Top of map = player facing (yaw) direction.
+-- Luanti: yaw=0→+Z(south), clockwise positive (π/2→-X/west).
+-- World right (+X/east at yaw=0) → screen +X; forward (+Z/south at yaw=0) → screen -Y.
+-- yaw-direction unit vector: (-sin(yaw), cos(yaw)) in (X,Z).
+-- right-direction unit vector: (cos(yaw), sin(yaw)) in (X,Z).
 local function world_to_screen(dx_world, dz_world, yaw, pixels_per_node, visible_radius_px)
-  -- Rotate world offset by player yaw (negate because minimap rotates opposite)
-  -- Round minimap: top of map = player facing direction
-  local cos_y = math.cos(-yaw)
-  local sin_y = math.sin(-yaw)
-  local rx = dx_world * cos_y - dz_world * sin_y
-  local rz = dx_world * sin_y + dz_world * cos_y
+  local c = math.cos(yaw)
+  local s = math.sin(yaw)
+  -- Project onto right → screen X, forward → screen -Y
+  local px = (dx_world * c + dz_world * s) * pixels_per_node
+  local py = (dx_world * s - dz_world * c) * pixels_per_node
 
-  local dist = math.sqrt(rx * rx + rz * rz)
-  local px = rx * pixels_per_node
-  local py = rz * pixels_per_node
+  local dist = math.sqrt(dx_world * dx_world + dz_world * dz_world)
+  local radius_nodes = visible_radius_px / pixels_per_node
+  local is_edge = dist > radius_nodes
 
-  local is_edge = dist > (visible_radius_px / pixels_per_node)
-  if is_edge then
-    local norm_dist = math.sqrt(rx * rx + rz * rz)
-    if norm_dist > 0 then
-      px = (rx / norm_dist) * visible_radius_px
-      py = (rz / norm_dist) * visible_radius_px
-    end
+  if is_edge and dist > 0 then
+    local scale = visible_radius_px / dist
+    px = (dx_world * c + dz_world * s) * scale
+    py = (dx_world * s - dz_world * c) * scale
   end
 
-  return px, -py, is_edge
-  -- Negate py because screen y increases downward
+  return px, py, is_edge
 end
 
 -- Select marker sources for a player
