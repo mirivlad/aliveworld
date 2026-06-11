@@ -178,7 +178,8 @@ T.register_test("aliveworld", "track_site_abstract_precision", function(ctx)
     return
   end
   ctx.log("Abstract site " .. site.id .. " precision=" .. tostring(result.precision) .. " physical=" .. tostring(result.physical_status))
-  ctx.assert.equal("abstract", result.precision, "abstract site should have 'abstract' precision")
+  ctx.assert.equal("abstract", result.physical_status, "abstract site should have 'abstract' physical_status")
+  ctx.assert.equal("approximate", result.precision, "abstract site should have 'approximate' precision")
 
   aliveworld.tracking.untrack(ctx.player_name)
 end)
