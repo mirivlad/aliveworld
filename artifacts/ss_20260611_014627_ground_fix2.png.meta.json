@@ -1,0 +1,25 @@
+{
+  "screenshot": "ss_20260611_014627_ground_fix2.png",
+  "screenshot_kind": "world_view",
+  "timestamp": "2026-06-10T17:46:32Z",
+  "player_pos": "(245,23,-145)",
+  "target_site": "site_birch_ford",
+  "target_pos": "(320,8,-180)",
+  "distance_to_target": 83,
+  "in_liquid": false,
+  "on_ground": false,
+  "hp": 20,
+  "breath": 10,
+  "hostile_mobs_nearby": 0,
+  "gps_enabled": true,
+  "active_tracks_count": 1,
+  "waypoint_hud_id": 135,
+  "radar_points_count": 8,
+  "visual_expectation": [
+    "clean_world",
+    "hud",
+    "radar",
+    "waypoint"
+  ],
+  "path": "/home/mirivlad/git/aliveworld/artifacts/ss_20260611_014627_ground_fix2.png"
+}

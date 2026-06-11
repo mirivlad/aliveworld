@@ -61,6 +61,10 @@ minetest.show_formspec = function(player_name, formname, formspec)
 	return orig_show_formspec(player_name, formname, formspec)
 end
 
+-- Guard flags to prevent double test execution
+local tests_in_progress = false
+local initial_autorun_done = false
+
 -- Auto-run tests when a test player connects
 local function ensure_sites()
 	if aliveworld and aliveworld.sites and aliveworld.sites.ensure_initial_settlement_sites then
@@ -89,30 +93,53 @@ local function write_tests_complete_signal()
 end
 
 local function run_all_tests(player_name)
+	if tests_in_progress then
+		minetest.log("warning", "[aliveworld_test_suite] tests already in progress, skipping duplicate run")
+		return
+	end
+	tests_in_progress = true
 	ensure_sites()
 	ui_state.reset()
 	minetest.log("action", "[aliveworld_test_suite] ========== RUNNING ALL TESTS ==========")
 	luanti_testkit.run_all({player_name = player_name})
 	minetest.log("action", "[aliveworld_test_suite] ========== TESTS COMPLETE ==========")
+	tests_in_progress = false
 	minetest.after(2, write_tests_complete_signal)
 end
 
 local function auto_run()
+	if initial_autorun_done then
+		return
+	end
+	initial_autorun_done = true
 	local player_name = "awbot"
-	minetest.log("action", "[aliveworld_test_suite] auto-run: checking for player '" .. player_name .. "'")
+	local MAX_WAIT = 120  -- maximum seconds to wait for player
+	local CHECK_INTERVAL = 5
+	local elapsed = 0
 
-	minetest.after(3, function()
+	minetest.log("action", "[aliveworld_test_suite] auto-run: waiting up to " .. MAX_WAIT .. "s for player '" .. player_name .. "'")
+
+	local function check_and_run()
+		if tests_in_progress then
+			minetest.log("action", "[aliveworld_test_suite] auto-run: tests in progress, skipping check")
+			return
+		end
+		elapsed = elapsed + CHECK_INTERVAL
 		local player = minetest.get_player_by_name(player_name)
-		if not player then
-			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found, delaying...")
-			minetest.after(5, function()
-				run_all_tests(player_name)
-			end)
-		else
+		if player then
 			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' online, running tests")
 			run_all_tests(player_name)
+		elseif elapsed < MAX_WAIT then
+			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found (" .. elapsed .. "s elapsed), retrying...")
+			minetest.after(CHECK_INTERVAL, check_and_run)
+		else
+			minetest.log("action", "[aliveworld_test_suite] auto-run: player '" .. player_name .. "' not found after " .. MAX_WAIT .. "s, running tests anyway")
+			ensure_sites()
+			run_all_tests(player_name)
 		end
-	end)
+	end
+
+	minetest.after(5, check_and_run)
 end
 
 -- Prepare for screenshot: safety checks, safe teleport, enable GPS/track, write state file

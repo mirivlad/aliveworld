@@ -1,0 +1,10 @@
+{
+  "screenshot": "ss_20260611_011819_clean_test3.png",
+  "screenshot_kind": "world_view",
+  "timestamp": "2026-06-10T17:18:22Z",
+  "client_ui_dirty": false,
+  "cleanup": "ensure_clean_world_view",
+  "restart_awbot_client": false,
+  "restored_commands": ["teleport","aw_gps on","aw_track site_birch_ford","aw_gps_debug"],
+  "path": "/home/mirivlad/git/aliveworld/artifacts/ss_20260611_011819_clean_test3.png"
+}
