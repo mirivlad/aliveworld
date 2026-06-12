@@ -22,6 +22,17 @@ chunksize = 5
 # TestKit can be used by PerfectWorld tests.
 load_mod_luanti_testkit = true
 
+# PerfectWorld
+load_mod_pw_core = true
+load_mod_pw_compat_mcl = true
+load_mod_pw_structures = true
+load_mod_pw_planner = true
+load_mod_pw_roads = true
+load_mod_pw_settlements = true
+load_mod_pw_population = true
+load_mod_pw_debug = true
+load_mod_pw_tests = true
+
 # External Mineclonia support mods.
 load_mod_mcl_decor = true
 load_mod_mcl_cozy = true
