@@ -264,6 +264,7 @@ dofile(minetest.get_modpath("aliveworld_core") .. "/settlements.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/terrain.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/claims.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/job_runner.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/routes.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/route_materialization.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
@@ -1263,25 +1264,40 @@ local function format_materialization_summary(state)
     progress = math.floor((((checkpoint.dense_index or 1) - 1) / state.dense_points_count) * 100 + 0.5)
     if progress > 100 then progress = 100 end
   end
+  local job_info = ""
+  if state.job_metrics then
+    job_info = string.format(" job_steps=%d cpu_total=%dms max_cpu=%dms over_budget=%d",
+      state.job_metrics.steps or 0,
+      state.job_metrics.total_cpu_ms or 0,
+      state.job_metrics.max_step_cpu_ms or 0,
+      state.job_metrics.over_budget_steps or 0)
+  end
   return string.format(
-    "materialization route=%s status=%s progress=%d%% processed_nodes=%d dense=%d changed=%d cleared=%d filled=%d cut=%d protected=%d blocked=%d unresolved=%d warnings=%d version=%s checkpoint=%s globalsteps=%d step_ms_max=%d",
+    "materialization route=%s status=%s progress=%d%% processed_nodes=%d dense=%d changed=%d veg=%d leaves=%d trunks=%d snow=%d fill=%d cut=%d prot=%d blocked=%d unknown=%d meta=%d other=%d unresolved=%d warnings=%d version=%s checkpoint=%s globalsteps=%d step_ms_max=%d%s",
     state.route_id or "?",
     state.status or "?",
     progress,
     state.processed_nodes or 0,
     state.dense_points_count or 0,
     state.changed_nodes or 0,
-    state.cleared_nodes or 0,
+    state.vegetation_removed or 0,
+    state.leaves_removed or 0,
+    state.trunks_removed or 0,
+    state.snow_removed or 0,
     state.filled_nodes or 0,
     state.cut_nodes or 0,
     state.skipped_protected or 0,
     state.skipped_blocked or 0,
+    state.unknown_blocked or 0,
+    state.metadata_protected or 0,
+    state.other_replaced or 0,
     state.unresolved and #state.unresolved or 0,
     state.warnings and #state.warnings or 0,
     tostring(state.materializer_version or "none"),
     tostring(checkpoint.dense_index or "none"),
     state.globalsteps or 0,
-    state.max_step_ms or 0
+    state.max_step_ms or 0,
+    job_info
   )
 end
 
@@ -1378,6 +1394,80 @@ minetest.register_chatcommand("aw_route_materialize_cancel", {
   end,
 })
 
+minetest.register_chatcommand("aw_route_materialize_verify", {
+  params = "<route_id>",
+  description = "Verify a materialized route (async, budgeted). Use aw_route_materialize_verify_status to check progress.",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_materialize_verify <route_id>"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local mat = aliveworld.routes.materialization
+    local status = mat.verify_status(param)
+    if status and status.status == "running" then
+      return false, "Verify already running for route " .. param .. ". Use /aw_route_materialize_verify_status " .. param .. " to check progress."
+    end
+    local ok, data = mat.verify_async(param)
+    if not ok then
+      return false, "Verify start failed: " .. tostring(data or "unknown")
+    end
+    return true, "Verify started for route " .. param .. " (async). Use /aw_route_materialize_verify_status " .. param .. " to check."
+  end,
+})
+
+minetest.register_chatcommand("aw_route_materialize_verify_status", {
+  params = "<route_id>",
+  description = "Show verify job progress for a route",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_materialize_verify_status <route_id>"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local status = aliveworld.routes.materialization.verify_status(param)
+    if not status then
+      return false, "Route not found: " .. param
+    end
+    local lines = {string.format("Verify route=%s status=%s total_checks=%d palette_mismatch=%d unexpected_water=%d outside_corridor=%d missing_surface=%d",
+      param, status.status, status.total_checks or 0,
+      status.palette_mismatch or 0, status.unexpected_water or 0,
+      status.outside_corridor or 0, status.missing_surface or 0)}
+    local md = status.mismatch_details
+    if md and md.by_lane then
+      table.insert(lines, string.format("  by_lane: road=%d shoulder=%d", md.by_lane.road or 0, md.by_lane.shoulder or 0))
+    end
+    if md and md.by_expected then
+      local parts = {}
+      for node_name, cnt in pairs(md.by_expected) do
+        table.insert(parts, node_name .. "=" .. cnt)
+      end
+      if #parts > 0 then
+        table.insert(lines, "  by_expected: " .. table.concat(parts, " "))
+      end
+    end
+    if md and md.by_actual then
+      local parts = {}
+      for node_name, cnt in pairs(md.by_actual) do
+        table.insert(parts, node_name .. "=" .. cnt)
+      end
+      if #parts > 0 then
+        table.insert(lines, "  by_actual: " .. table.concat(parts, " "))
+      end
+    end
+    if status.metrics and status.metrics.steps then
+      table.insert(lines, string.format("  steps=%d cpu=%dms max_step=%dms over=%d",
+        status.metrics.steps, status.metrics.total_cpu_ms,
+        status.metrics.max_step_cpu_ms, status.metrics.over_budget_steps))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
 minetest.register_chatcommand("aw_route_materialize_debug", {
   params = "<route_id>",
   description = "Show route materialization debug summary",
@@ -1403,9 +1493,28 @@ minetest.register_chatcommand("aw_route_materialize_debug", {
         tostring(state.palette.surface), tostring(state.palette.shoulder), tostring(state.palette.fill), tostring(state.palette.base)))
     end
     if state and state.settings then
-      table.insert(lines, string.format("Settings: centerline_step=%s road_width=%s shoulder_width=%s max_cut=%s max_fill=%s points_per_step=%s",
+      table.insert(lines, string.format("Settings: centerline_step=%s road_width=%s shoulder_width=%s max_cut=%s max_fill=%s pps=%s budget=%dms",
         tostring(state.settings.centerline_step), tostring(state.settings.road_width), tostring(state.settings.shoulder_width),
-        tostring(state.settings.max_cut), tostring(state.settings.max_fill), tostring(state.settings.points_per_step)))
+        tostring(state.settings.max_cut), tostring(state.settings.max_fill), tostring(state.settings.points_per_step or 2),
+        state.settings.target_budget_ms or 25))
+    end
+    if state and state.job_metrics then
+      local m = state.job_metrics
+      table.insert(lines, string.format("Job metrics: steps=%d total_cpu=%dms max_cpu=%dms over_budget=%d emerge_wait=%dms",
+        m.steps or 0, m.total_cpu_ms or 0, m.max_step_cpu_ms or 0, m.over_budget_steps or 0, m.total_emerge_wait_ms or 0))
+      if m.phases then
+        local max_phase_ms = 0
+        local max_phase_name = ""
+        for pname, pm in pairs(m.phases) do
+          if pm.max_ms and pm.max_ms > max_phase_ms then
+            max_phase_ms = pm.max_ms
+            max_phase_name = pname
+          end
+        end
+        if max_phase_name ~= "" then
+          table.insert(lines, string.format("Phase peaks: %s=%dms", max_phase_name, max_phase_ms))
+        end
+      end
     end
     if state and state.warnings and #state.warnings > 0 then
       local max_items = math.min(#state.warnings, 5)

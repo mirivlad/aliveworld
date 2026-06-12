@@ -109,12 +109,12 @@ claims. Conflicts return structured reasons instead of being ignored.
 Physical road placement is tracked separately from the canonical route plan in
 mod storage under `aliveworld_route_materialization`.
 
-Materialization state contract:
+Materialization state contract (version 2):
 
 ```lua
 {
   route_id = "old_road",
-  materializer_version = 1,
+  materializer_version = 2,
   status = "materialized", -- planned, materializing, materialized, failed
   started_at = "2026-06-12T06:01:50Z",
   completed_at = "2026-06-12T06:02:28Z",
@@ -124,26 +124,49 @@ Materialization state contract:
   shoulder_width = 1,
   dense_points_count = 576,
   changed_nodes = 2728,
-  cleared_nodes = 447,
+  vegetation_removed = 0,
+  leaves_removed = 0,
+  trunks_removed = 0,
+  snow_removed = 0,
   filled_nodes = 122,
   cut_nodes = 142,
   skipped_protected = 0,
   skipped_blocked = 0,
+  unknown_blocked = 0,
+  metadata_protected = 0,
+  other_replaced = 0,
   water_segments = 0,
   warnings = {},
   unresolved = {},
-  checkpoint = {dense_index = 577},
+  checkpoint = {dense_index = 577, phase = "mutate"},
   settings = {
     centerline_step = 2,
     max_cut = 4,
     max_fill = 7,
-    points_per_step = 8,
+    points_per_step = 2,
+    max_ops_per_step = 10,
+    target_budget_ms = 25,
+    hard_warn_threshold_ms = 50,
+    persist_interval_steps = 5,
+  },
+  job_metrics = {
+    steps = 0,
+    total_cpu_ms = 0,
+    max_step_cpu_ms = 0,
+    over_budget_steps = 0,
+    total_emerge_wait_ms = 0,
+    phases = {
+      emerge = {calls = 0, total_ms = 0, max_ms = 0},
+      scan = {calls = 0, total_ms = 0, max_ms = 0},
+      profile = {calls = 0, total_ms = 0, max_ms = 0},
+      mutate = {calls = 0, total_ms = 0, max_ms = 0},
+    },
   },
 }
 ```
 
 The materializer densifies saved planner controls to a centerline with a maximum
-step of 2 nodes. It recomputes the real surface for each dense point and then
+step of 2 nodes. It samples the real surface for each dense point and then
 writes a 3-node road bed plus one-node shoulders inside the route claim. The
 current palette is selected from registered Mineclonia nodes:
 
@@ -163,16 +186,60 @@ solid nodes, protected nodes, nodes with metadata or inventory, or cells outside
 the route corridor. Large unresolved terrain causes a failed job instead of
 silently materializing a broken route.
 
-Jobs are budgeted on globalstep. The checkpoint stores the next dense centerline
-index, so a restart resumes a `materializing` route. A completed materialization
+Clearance statistics are broken down by category:
+- `vegetation_removed`: grass, flowers, flora, saplings, bushes
+- `leaves_removed`: leaf blocks (leafdecay group)
+- `trunks_removed`: tree/wood blocks (tree group)
+- `snow_removed`: snow layers
+- `unknown_blocked`: non-natural solid that could not be cleared
+- `metadata_protected`: nodes with metadata or inventory
+- `other_replaced`: other non-solid or unknown walkable nodes
+
+Jobs use a shared budgeted runner (`aliveworld.job_runner`) that enforces both
+operation count and wall-clock time limits per globalstep. Key settings:
+
+- `target_budget_ms`: soft budget in milliseconds (default 25). The step yields
+  when this is exceeded and work remains.
+- `hard_warn_threshold_ms`: warning threshold (default 50). Steps exceeding this
+  are logged and counted in `job_metrics.over_budget_steps`.
+- `max_ops_per_step`: maximum node operations per step (default 10). Combined
+  with time budget for deterministic throttling.
+
+Budget measurement uses `minetest.get_us_time()` (monotonic microseconds). CPU
+step time excludes asynchronous emerge wait; emerge wait is tracked separately
+as `total_emerge_wait_ms` in job metrics.
+
+Checkpoint persistence is throttled: writes happen after each processed chunk
+or every `persist_interval_steps` steps (default 5), not after every individual
+node edit. The checkpoint stores the next dense centerline index and current
+phase, so a restart resumes a `materializing` route. A completed materialization
 is idempotent: repeated normal starts return the saved state and do not widen or
 raise the road. A force replan of the route clears stale materialization state
 for that route.
+
+Per-cell surface sampling uses a lightweight column scan
+(`local_surface_at`) instead of the expensive terrain survey
+(`terrain.route_sample` → `terrain.survey`) that was the source of prior
+>800ms steps. Results are cached per XZ position in `surface_cache` to avoid
+re-scanning overlapping cells between adjacent dense points. The cache is
+stored in memory only and discarded on restart.
 
 Dry-run uses the same dense centerline, profile, claim, palette, and safety
 checks but does not modify nodes. It reports predicted changed/cleared/fill/cut
 counts, protected or blocked cells, unexpected water, warnings, and unresolved
 segments.
+
+## Verify Mode
+
+The materializer provides a synchronous verify scan for already materialized
+routes. It checks each cell of the dense centerline for:
+- Palette node present within ±3 blocks of the expected road Y
+- Unexpected water in the road bed
+- Position inside the route corridor claim
+
+Verify does not modify nodes, claims, or persistent state. It requires the
+route to have `status = "materialized"`. The report includes counts of palette
+mismatches, water encounters, and outside-corridor cells.
 
 ## Commands
 
@@ -190,8 +257,12 @@ segments.
   unresolved count, checkpoint, and materializer version.
 - `/aw_route_materialize_cancel <route_id>`: cancel a running job with a
   controlled `failed` state.
+- `/aw_route_materialize_verify <route_id>`: run synchronous verify scan on a
+  materialized route. Reports palette mismatches, unexpected water, and
+  outside-corridor cells without modifying the world.
 - `/aw_route_materialize_debug <route_id>`: show route summary, materialization
-  summary, palette, settings, and first warnings/unresolved items.
+  summary, palette, settings, job metrics (steps, CPU total/max, over-budget
+  count, phase peaks), and first warnings/unresolved items.
 
 `/aw_route_plan old_road` plans the canonical Old Road route from Birch Ford to
 Stone Gully. Both endpoint sites must exist, have `anchor_pos`, and have
