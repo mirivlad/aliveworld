@@ -42,17 +42,30 @@ find_xauth() {
   echo "$xauth"
 }
 
+find_display() {
+  local xauth display_num
+  xauth=$(find_xauth)
+  if [ -z "$xauth" ]; then
+    echo "$DISPLAY_NUM"
+    return
+  fi
+  # Find the Xvfb process that uses this xauth file and extract its display number
+  display_num=$(ps aux | grep -F "$xauth" | grep -oP 'Xvfb :\K\d+' | head -1)
+  echo "${display_num:-$DISPLAY_NUM}"
+}
+
 screenshot() {
   local name="${1:-screenshot}"
   local path="$SCREENSHOT_DIR/${name}.png"
-  local xauth
+  local xauth display
   xauth=$(find_xauth)
+  display=$(find_display)
   if [ -z "$xauth" ]; then
     log "WARNING: no xauth found, screenshot may fail"
     return 1
   fi
-  if ! DISPLAY=":$DISPLAY_NUM" XAUTHORITY="$xauth" import -window root "$path" 2>/dev/null; then
-    log "ERROR: screenshot failed (display :$DISPLAY_NUM, xauth: $xauth)"
+  if ! DISPLAY=":$display" XAUTHORITY="$xauth" import -window root "$path" 2>/dev/null; then
+    log "ERROR: screenshot failed (display :$display, xauth: $xauth)"
     return 1
   fi
   log "screenshot saved: $path ($(du -h "$path" | cut -f1))"
