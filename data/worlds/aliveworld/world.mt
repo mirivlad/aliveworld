@@ -10,18 +10,17 @@ seed = 5565029253200206738
 water_level = 1
 chunksize = 5
 
-load_mod_aliveworld_core = true
-load_mod_aliveworld_bridge_mcl = true
-load_mod_aliveworld_admin = true
-load_mod_aliveworld_player = true
-load_mod_aliveworld_world = true
+# Frozen: AliveWorld (see docs/aliveworld-freeze.md)
+# load_mod_aliveworld_core = false
+# load_mod_aliveworld_bridge_mcl = false
+# load_mod_aliveworld_admin = false
+# load_mod_aliveworld_player = false
+# load_mod_aliveworld_world = false
+# load_mod_aliveworld_remote_controller = false
+# load_mod_aliveworld_test_suite = false
 
-# Remote controller -- dev/test JSON control.
-load_mod_aliveworld_remote_controller = true
-
-# TestKit -- dev/test only.
+# TestKit can be used by PerfectWorld tests.
 load_mod_luanti_testkit = true
-load_mod_aliveworld_test_suite = true
 
 # External Mineclonia support mods.
 load_mod_mcl_decor = true
