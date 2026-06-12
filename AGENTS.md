@@ -178,7 +178,15 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
 ### Остановка test mode
 
 ```bash
+# Остановить test mode и очистить тестовый лог (data/debug.txt не трогать)
 docker compose -f docker-compose.yml -f docker-compose.test.yml down
+: > data/debug-test.txt
+```
+
+### Очистка тестового лога без остановки
+
+```bash
+: > data/debug-test.txt
 ```
 
 ### Возврат в player mode
@@ -210,7 +218,7 @@ docker inspect luanti-aliveworld --format='{{json .Config.Cmd}}'
 - **Не удалять** world, mod storage, auth/player state.
 - **Не менять** seed, mapgen, `world.mt`.
 - **Не пересоздавать** мир без прямого указания пользователя.
-- После restart дождаться готовности (проверить `docker logs` или `debug.txt` на `Server for gameid="mineclonia" listening`).
+- После restart дождаться готовности: проверить свежий фрагмент `data/debug.txt` (player mode) или `data/debug-test.txt` (test mode) на `Server for gameid="mineclonia" listening`. **Не использовать `docker logs`** для readiness — он зашумлён ncurses-кодами при `--terminal`.
 - Запускать awbot/TestKit только после полной готовности сервера.
 - Любые destructive операции (reset sites, clear events, delete world) — только с разрешения пользователя.
 
@@ -256,6 +264,62 @@ dd if=data/debug.txt bs=1 skip=$BYTE 2>/dev/null | head -100
 
 # TestKit отчёт
 grep '\[luanti_testkit\]' data/debug.txt | tail -50
+```
+
+### Readiness (ожидание готовности сервера)
+
+Сохраняйте byte offset **до** restart, затем читайте только свежий фрагмент.
+Такой подход не найдёт записи старого запуска.
+
+```bash
+# Player mode
+LOG=data/debug.txt
+START_OFFSET=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+
+docker compose up -d
+
+timeout 60 sh -c '
+  while :; do
+    dd if="'"$LOG"'" bs=1 skip="'"$START_OFFSET"'" 2>/dev/null |
+      grep -q "Server for gameid=.*listening" && exit 0
+    sleep 1
+  done
+'
+```
+
+```bash
+# Test mode — логи пишутся в отдельный файл
+LOG=data/debug-test.txt
+START_OFFSET=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+
+timeout 60 sh -c '
+  while :; do
+    dd if="'"$LOG"'" bs=1 skip="'"$START_OFFSET"'" 2>/dev/null |
+      grep -q "Server for gameid=.*listening" && exit 0
+    sleep 1
+  done
+'
+```
+
+### Await awbot (ожидание подключения тестового клиента)
+
+Аналогичная техника с offset:
+
+```bash
+LOG=data/debug.txt
+START_OFFSET=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+
+./scripts/run-test-ui.sh start
+
+timeout 30 sh -c '
+  while :; do
+    dd if="'"$LOG"'" bs=1 skip="'"$START_OFFSET"'" 2>/dev/null |
+      grep -q "awbot.*joins game" && exit 0
+    sleep 1
+  done
+'
 ```
 
 ### Правила
@@ -423,12 +487,21 @@ grep -q "awbot.*joins game" data/debug.txt && echo "connected"
 echo '{"command":"runchat","chatcmd":"ltk_all","params":"awbot","player":"awbot"}' \
   > data/worlds/aliveworld/rc_cmd.json
 
-# 6. Дождаться завершения (учитывать время выполнения ~30-60s)
-sleep 30
-grep '\[luanti_testkit\] Summary' data/debug.txt | tail -5
+# 6. Дождаться нового TestKit report (timeout 120s)
+PREV_REPORT=$(ls -t data/worlds/aliveworld/ltk_report_*.json 2>/dev/null | head -1)
+timeout 120 sh -c '
+  while :; do
+    LATEST=$(ls -t data/worlds/aliveworld/ltk_report_*.json 2>/dev/null | head -1)
+    if [ -n "$LATEST" ] && [ "$LATEST" != "'"$PREV_REPORT"'" ]; then
+      echo "New report: $LATEST"
+      exit 0
+    fi
+    sleep 2
+  done
+' && echo "Tests completed" || echo "ERROR: TestKit timeout (no new report in 120s)"
 
-# 7. Найти отчёт
-ls -t data/worlds/aliveworld/ltk_report_*.json | head -1
+# 7. Проверить сводку
+grep '\[luanti_testkit\] Summary' data/debug.txt | tail -5
 ```
 
 **TestKit через консоль (альтернатива):**
@@ -500,7 +573,7 @@ docker exec -i luanti-aliveworld sh -c 'echo "/ltk_all awbot" > /proc/1/fd/0'
 
 ### Когда визуальная проверка обязательна
 
-- HUD/GPS (radar, tracking waypoint)
+- HUD/GPS (radar, tracking target и info HUD)
 - Дороги (route materialization)
 - Structures (маркеры, POI)
 - Terrain materialization
