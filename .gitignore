@@ -9,6 +9,7 @@ locks/
 artifacts/test-reports/*.json
 artifacts/test-reports/*.log
 logs/
+run/
 secrets/*
 !secrets/awbot.password.example
 *.log
