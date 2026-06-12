@@ -242,7 +242,8 @@ end
 -- Returns {x, y, z} where a player can safely stand.
 function aliveworld.sites.resolve_arrival_pos(site)
   if not site then return nil end
-  local base_pos = site.anchor_pos or site.pos
+  local route_pos = site.data and site.data.route_id and site.data.representative_route_pos or nil
+  local base_pos = route_pos or site.anchor_pos or site.pos
   if not base_pos then return nil end
 
   -- Search from above downward for a walkable surface

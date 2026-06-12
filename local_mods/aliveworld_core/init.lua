@@ -265,6 +265,7 @@ dofile(minetest.get_modpath("aliveworld_core") .. "/terrain.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/sites.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/claims.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/routes.lua")
+dofile(minetest.get_modpath("aliveworld_core") .. "/route_materialization.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/world_events.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/rumors.lua")
 dofile(minetest.get_modpath("aliveworld_core") .. "/tracking.lua")
@@ -1249,6 +1250,171 @@ minetest.register_chatcommand("aw_route_debug", {
       end
     else
       table.insert(lines, "Job: none")
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+local function format_materialization_summary(state)
+  if not state then return "Materialization: none" end
+  local checkpoint = state.checkpoint or {}
+  local progress = 0
+  if (state.dense_points_count or 0) > 0 then
+    progress = math.floor((((checkpoint.dense_index or 1) - 1) / state.dense_points_count) * 100 + 0.5)
+    if progress > 100 then progress = 100 end
+  end
+  return string.format(
+    "materialization route=%s status=%s progress=%d%% processed_nodes=%d dense=%d changed=%d cleared=%d filled=%d cut=%d protected=%d blocked=%d unresolved=%d warnings=%d version=%s checkpoint=%s globalsteps=%d step_ms_max=%d",
+    state.route_id or "?",
+    state.status or "?",
+    progress,
+    state.processed_nodes or 0,
+    state.dense_points_count or 0,
+    state.changed_nodes or 0,
+    state.cleared_nodes or 0,
+    state.filled_nodes or 0,
+    state.cut_nodes or 0,
+    state.skipped_protected or 0,
+    state.skipped_blocked or 0,
+    state.unresolved and #state.unresolved or 0,
+    state.warnings and #state.warnings or 0,
+    tostring(state.materializer_version or "none"),
+    tostring(checkpoint.dense_index or "none"),
+    state.globalsteps or 0,
+    state.max_step_ms or 0
+  )
+end
+
+local function format_materialization_item(prefix, item)
+  if not item then return nil end
+  local text = prefix .. ": " .. tostring(item.reason or "unknown")
+  if item.pos then
+    text = text .. " at " .. minetest.pos_to_string(item.pos)
+  elseif item.x and item.z then
+    text = text .. string.format(" at x=%s z=%s", tostring(item.x), tostring(item.z))
+  end
+  if item.node then text = text .. " node=" .. tostring(item.node) end
+  if item.delta then text = text .. " delta=" .. tostring(item.delta) end
+  if item.lane then text = text .. " lane=" .. tostring(item.lane) end
+  return text
+end
+
+minetest.register_chatcommand("aw_route_materialize", {
+  params = "<route_id> [dry-run]",
+  description = "Dry-run or start budgeted route materialization",
+  privs = {server = true},
+  func = function(name, param)
+    local route_id, mode = (param or ""):match("^(%S+)%s*(.-)$")
+    if not route_id or route_id == "" then
+      return false, "Usage: /aw_route_materialize <route_id> [dry-run]"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local ok, result
+    if mode == "dry-run" or mode == "dry_run" or mode == "dry" then
+      ok, result = aliveworld.routes.materialization.dry_run(route_id, {actor = name})
+      if not ok then
+        return false, "Route materialization dry-run failed: " .. tostring(result.error or "unknown")
+      end
+      local lines = {"Dry-run " .. format_materialization_summary(result)}
+      if result.unresolved and #result.unresolved > 0 then
+        local first = result.unresolved[1]
+        table.insert(lines, format_materialization_item("First unresolved", first))
+      end
+      return true, table.concat(lines, "\n")
+    end
+    ok, result = aliveworld.routes.materialization.start(route_id, {actor = name})
+    if not ok then
+      return false, "Route materialization failed: " .. tostring(result.error or "unknown")
+    end
+    return true, "Started " .. format_materialization_summary(result)
+  end,
+})
+
+minetest.register_chatcommand("aw_route_materialize_status", {
+  params = "<route_id>",
+  description = "Show route materialization status",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_materialize_status <route_id>"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local state = aliveworld.routes.materialization.status(param)
+    if not state then
+      return false, "No materialization state for route: " .. param
+    end
+    local lines = {format_materialization_summary(state)}
+    if state.last_error then
+      table.insert(lines, "Last error: " .. tostring(state.last_error))
+    end
+    if state.unresolved and #state.unresolved > 0 then
+      local first = state.unresolved[1]
+      table.insert(lines, format_materialization_item("First unresolved", first))
+    end
+    return true, table.concat(lines, "\n")
+  end,
+})
+
+minetest.register_chatcommand("aw_route_materialize_cancel", {
+  params = "<route_id>",
+  description = "Cancel a running route materialization job",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_materialize_cancel <route_id>"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local ok, result = aliveworld.routes.materialization.cancel(param, "cancelled_by_command")
+    if not ok then
+      return false, "Cancel failed: " .. tostring(result.error or "unknown")
+    end
+    return true, "Cancelled " .. format_materialization_summary(result)
+  end,
+})
+
+minetest.register_chatcommand("aw_route_materialize_debug", {
+  params = "<route_id>",
+  description = "Show route materialization debug summary",
+  privs = {server = true},
+  func = function(_, param)
+    if not param or param == "" then
+      return false, "Usage: /aw_route_materialize_debug <route_id>"
+    end
+    if not aliveworld.routes or not aliveworld.routes.materialization then
+      return false, "Route materialization module not loaded"
+    end
+    local route = aliveworld.routes.get(param)
+    local state = aliveworld.routes.materialization.status(param)
+    local lines = {}
+    if route then
+      table.insert(lines, format_route_summary(route))
+    else
+      table.insert(lines, "Route: not saved")
+    end
+    table.insert(lines, format_materialization_summary(state))
+    if state and state.palette then
+      table.insert(lines, string.format("Palette: surface=%s shoulder=%s fill=%s base=%s",
+        tostring(state.palette.surface), tostring(state.palette.shoulder), tostring(state.palette.fill), tostring(state.palette.base)))
+    end
+    if state and state.settings then
+      table.insert(lines, string.format("Settings: centerline_step=%s road_width=%s shoulder_width=%s max_cut=%s max_fill=%s points_per_step=%s",
+        tostring(state.settings.centerline_step), tostring(state.settings.road_width), tostring(state.settings.shoulder_width),
+        tostring(state.settings.max_cut), tostring(state.settings.max_fill), tostring(state.settings.points_per_step)))
+    end
+    if state and state.warnings and #state.warnings > 0 then
+      local max_items = math.min(#state.warnings, 5)
+      for i = 1, max_items do
+        table.insert(lines, format_materialization_item("Warning " .. i, state.warnings[i]))
+      end
+    end
+    if state and state.unresolved and #state.unresolved > 0 then
+      table.insert(lines, format_materialization_item("First unresolved", state.unresolved[1]))
     end
     return true, table.concat(lines, "\n")
   end,

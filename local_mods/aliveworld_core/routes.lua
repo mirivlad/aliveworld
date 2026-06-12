@@ -581,6 +581,12 @@ local function validate_and_save_route(route, opts)
   end
   route.claim_id = claim.claim_id
   routes[route.route_id] = copy_table(route)
+  if opts.force_replan == true
+    and aliveworld.routes
+    and aliveworld.routes.materialization
+    and aliveworld.routes.materialization.reset then
+    aliveworld.routes.materialization.reset(route.route_id)
+  end
   save_all()
   return true, copy_table(route)
 end
@@ -603,6 +609,42 @@ end
 function aliveworld.routes.get(route_id)
   local route = routes[route_id]
   return route and copy_table(route) or nil
+end
+
+function aliveworld.routes.save(route, opts)
+  opts = opts or {}
+  if not route or not route.route_id then
+    return false, {error = "invalid_route", field = "route_id"}
+  end
+  if aliveworld.claims then
+    local claim = route_claim(route)
+    local ok_claim, claim_result = aliveworld.claims.register(claim, {
+      replace = opts.replace == true,
+      allowed_owner_ids = {
+        [route.from_site_id] = true,
+        [route.to_site_id] = true,
+      },
+    })
+    if not ok_claim then
+      return false, claim_result
+    end
+    route.claim_id = claim.claim_id
+  end
+  routes[route.route_id] = copy_table(route)
+  save_all()
+  return true, copy_table(route)
+end
+
+function aliveworld.routes.update(route_id, patch)
+  local route = routes[route_id]
+  if not route then
+    return false, {error = "route_not_found", route_id = route_id}
+  end
+  for k, v in pairs(patch or {}) do
+    route[k] = v
+  end
+  save_all()
+  return true, copy_table(route)
 end
 
 function aliveworld.routes.delete(route_id)

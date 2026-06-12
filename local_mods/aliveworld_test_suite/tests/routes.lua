@@ -269,9 +269,13 @@ T.register_test("aliveworld", "old_road_live_plan_endpoints_anchored", function(
 		ctx.skip("stone_gully is not anchored in runtime state")
 		return
 	end
-	local ok, route = routes.plan_old_road({sync = true, force_replan = true})
-	ctx.assert.is_true(ok, "old_road must plan in current carpathian dev world")
-	if not ok then return end
+	local route = routes.get("old_road")
+	if not route or route.status ~= "materialized" then
+		local ok, planned = routes.plan_old_road({sync = true, force_replan = true})
+		ctx.assert.is_true(ok, "old_road must plan in current carpathian dev world")
+		if not ok then return end
+		route = planned
+	end
 	ctx.assert.equal("old_road", route.route_id, "old road route id must be stable")
 	ctx.assert.equal(birch.id, route.from_site_id, "old road from endpoint must be Birch Ford canonical site id")
 	ctx.assert.equal(stone.id, route.to_site_id, "old road to endpoint must be Stone Gully canonical site id")

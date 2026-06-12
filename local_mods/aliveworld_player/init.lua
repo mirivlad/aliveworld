@@ -1193,7 +1193,11 @@ minetest.register_chatcommand("aw_gps_debug", {
         local phys = site.physical_status or "abstract"
         table.insert(lines, string.format("  Title: %s", site.name_en or site.name))
         table.insert(lines, string.format("  Physical: %s", phys))
-        table.insert(lines, string.format("  Pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+        local debug_pos = t.target_pos or site.pos
+        table.insert(lines, string.format("  Pos: (%d,%d,%d)", debug_pos.x, debug_pos.y, debug_pos.z))
+        if t.target_pos and site.pos then
+          table.insert(lines, string.format("  Logical pos: (%d,%d,%d)", site.pos.x, site.pos.y, site.pos.z))
+        end
       end
       if t.target_pos then
         local dx = t.target_pos.x - ppos.x

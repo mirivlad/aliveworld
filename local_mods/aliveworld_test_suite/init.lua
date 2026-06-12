@@ -35,6 +35,7 @@ local test_files = {
 	"radar",
 	"anchors",
 	"routes",
+	"route_materialization",
 	"rumors",
 	"tracking_state",
 	"rumors_flow",
