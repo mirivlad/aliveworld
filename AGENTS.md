@@ -53,7 +53,7 @@ AliveWorld — серверный набор модов для **Luanti 5.16.1**
 - Долгие world jobs (`route_materialization`) используют budgeted runner с `target_budget_ms` и checkpoint'ами.
 - Физические изменения мира проверяют claims, protection (`is_protected`), и безопасную классификацию nodes.
 - GPS/tracking ссылается на каноническую физическую позицию (`anchor_pos` или `representative_route_pos`).
-- Трекинг использует `type = "waypoint"` (серверный HUD-элемент, 3D beacon). GPS/радар — отдельный `type = "minimap"` HUD-элемент.
+- Трекинг использует `hud_elem_type = "text"` info HUD (направление + расстояние). GPS/радар — `type = "minimap"` + `hud_elem_type = "image"` маркеры. 3D waypoint (`hud_elem_type = "waypoint"`) не используется — старая реализация удалена, цели отображаются только на GPS-миникарте.
 - `aliveworld_core` **по mod.conf не зависит** от Mineclonia (`mod.conf` не указывает `depends = mcl_core`). Однако `route_materialization.lua` напрямую ссылается на `mcl_core:coarse_dirt` и другие Mineclonia node name'ы. Это известное несоответствие, которое необходимо устранить миграцией через bridge.
 - Environment-dependent тесты ждут awbot + emerge, а не флапают (см. `auto_run` в `aliveworld_test_suite/init.lua`).
 - Отсутствие внешнего предусловия (например, player offline) — не `ERROR`, а `SKIP`.
@@ -82,7 +82,7 @@ AliveWorld — серверный набор модов для **Luanti 5.16.1**
 | `aliveworld_admin` | `aliveworld_core` | _нет_ |
 | `aliveworld_player` | `aliveworld_core` | `aliveworld_bridge_mcl, mcl_core` |
 | `aliveworld_world` | `aliveworld_core` | `aliveworld_bridge_mcl, aliveworld_player, mcl_core` |
-| `aliveworld_remote_controller` | _broken mod.conf (нет поля name)_ | _нет_ |
+| `aliveworld_remote_controller` | `aliveworld_core` | _нет_ |
 | `luanti_testkit` | _нет_ | `aliveworld_core, aliveworld_player, aliveworld_world` |
 | `aliveworld_test_suite` | `luanti_testkit` | `aliveworld_core, aliveworld_player, aliveworld_world, aliveworld_bridge_mcl, aliveworld_admin` |
 
@@ -245,9 +245,14 @@ tail -100 data/debug-test.txt
 # Поиск ошибок
 grep -i "ModError\|LuaError\|SCRIPT ERROR\|traceback\|ERROR" data/debug.txt | tail -30
 
-# Только текущий запуск: найти startup marker и показать с него
+# Только текущий запуск: найти startup marker и показать всё после него
 grep -n "Server for gameid=" data/debug.txt | tail -1
-# Затем извлечь строки после этого маркера (например, через awk или tail +N)
+LINE=$(grep -n "Server for gameid=" data/debug.txt | tail -1 | cut -d: -f1)
+tail -n +$LINE data/debug.txt
+
+# Байтовый offset (быстрее для больших файлов):
+BYTE=$(grep -boa "Server for gameid=" data/debug.txt | tail -1 | cut -d: -f1)
+dd if=data/debug.txt bs=1 skip=$BYTE 2>/dev/null | head -100
 
 # TestKit отчёт
 grep '\[luanti_testkit\]' data/debug.txt | tail -50
@@ -290,6 +295,12 @@ grep '\[luanti_testkit\]' data/debug.txt | tail -50
 
 **Эти команды взаимоисключающие** — нельзя запустить два awbot с одним именем на одном сервере. `run-test-ui.sh` проверяет `run/awbot.pid` и отказывается запускаться, если процесс жив.
 
+Особенности `run-test-client.sh`:
+- Не создаёт PID-файл и не поддерживает clean stop (kill по PID вручную).
+- Не использует xvfb по умолчанию (если `HEADLESS=1`, пытается использовать xvfb-run если доступен).
+- Подходит для быстрого запуска без скриншотов и без UI.
+- Может создать дубликат awbot — проверяйте `grep "awbot.*joins game" data/debug.txt` перед запуском.
+
 ### Проверка подключения
 
 ```bash
@@ -322,6 +333,8 @@ echo '{"command":"teleport","pos":{"x":0,"y":4,"z":0},"player":"awbot"}' \
 ```
 
 Поддерживаемые команды: `teleport`, `runchat`, `whereami`, `kick`, `runall`.
+
+**Важно для `runchat`**: поле `chatcmd` указывается **без** ведущего `/`. Команда регистрируется в `minetest.registered_chatcommands` (например, `"ltk_all"`, `"aw_gps"`, `"aw_clean_ui"`, `"aw_prepare_shot"`). Проверить наличие: `/help <cmd>`.
 
 Ответы и отчёты появляются в `debug.txt` с меткой `[rc_controller]`.
 
@@ -400,17 +413,34 @@ docker compose up -d
 # 2. Дождаться готовности
 grep -q "listening" data/debug.txt && echo "ready"
 
-# 3. Запустить awbot
-./scripts/run-test-client.sh
+# 3. Запустить awbot (managed — с PID, xvfb, screenshot)
+./scripts/run-test-ui.sh start
 
 # 4. Дождаться подключения
 grep -q "awbot.*joins game" data/debug.txt && echo "connected"
 
-# 5. Выполнить тесты (через консоль)
-# Использовать docker attach + /ltk_all awbot
+# 5. Выполнить тесты — через remote controller (без docker attach)
+echo '{"command":"runchat","chatcmd":"ltk_all","params":"awbot","player":"awbot"}' \
+  > data/worlds/aliveworld/rc_cmd.json
 
-# 6. Найти отчёт
+# 6. Дождаться завершения (учитывать время выполнения ~30-60s)
+sleep 30
+grep '\[luanti_testkit\] Summary' data/debug.txt | tail -5
+
+# 7. Найти отчёт
 ls -t data/worlds/aliveworld/ltk_report_*.json | head -1
+```
+
+**TestKit через консоль (альтернатива):**
+
+```bash
+# Через docker attach (для интерактивной диагностики)
+docker attach luanti-aliveworld
+/ltk_all awbot
+# Выход: Ctrl+P Ctrl+Q
+
+# Или через консольный ввод (без attach):
+docker exec -i luanti-aliveworld sh -c 'echo "/ltk_all awbot" > /proc/1/fd/0'
 ```
 
 **TestKit reports** сохраняются в `data/worlds/aliveworld/ltk_report_*.json`.
@@ -465,6 +495,7 @@ ls -t data/worlds/aliveworld/ltk_report_*.json | head -1
 - Полноценный стабильный screenshot workflow существует, но требует xvfb
 - Без xvfb HEADLESS=1 выдаёт предупреждение
 - Скриншоты требуют запущенного GUI-клиента Luanti (не headless в смысле `--go`)
+- `run-test-ui.sh` автоматически определяет номер дисплея Xvfb (функция `find_display`), который может отличаться от `DISPLAY_NUM=99`, если `xvfb-run --auto-servernum` выбрал другой номер
 - Runtime artifacts (`artifacts/*.png`, `artifacts/*.json`) не коммитить
 
 ### Когда визуальная проверка обязательна
@@ -563,4 +594,4 @@ git diff --check
 - **TestKit зависит от awbot** (подключённого игрока). Тесты без player — SKIP.
 - **Engine API** может давать неделимые latency peaks (см. `Maximum lag peaked at` в логах). Budgeted jobs учитывают это через `target_budget_ms`.
 - **`docker logs` непригоден** для чтения при `--terminal`. Использовать `data/debug.txt`.
-- **aliveworld_remote_controller** не имеет mod.conf с полем name (deprecation warning).
+- **aliveworld_remote_controller** использует `aliveworld_core` как runtime-зависимость (server tick для JSON poll).
