@@ -45,17 +45,16 @@ AliveWorld — серверный набор модов для **Luanti 5.16.1**
 
 Подтверждено кодом (`local_mods/aliveworld_core/`, `local_mods/aliveworld_world/`):
 
-- `aliveworld_core` **не зависит** напрямую от Mineclonia. Все обращения к item/node работают через `aliveworld_bridge_mcl`.
-- `aliveworld_core` — единственный source of truth для состояния живого мира.
 - Логическое состояние site отделено от физического: `physical_status ∈ {"abstract", "anchored", "materialized"}`.
-- **Anchoring** (terrain survey + marker node) **не равен** materialization (полноценный POI).
+- **Terrain anchoring** (terrain survey для определения поверхности) **не равен** marker materialization (физический signlike marker node) **и не равен** route materialization (полноценная дорога).
 - Обычный tick **не перемещает** anchored site самопроизвольно.
 - Persistence использует `minetest.get_mod_storage()`, а не параллельные файлы.
 - Route planning отделён от route materialization. Planned route — логический коридор с claim, без физических блоков.
 - Долгие world jobs (`route_materialization`) используют budgeted runner с `target_budget_ms` и checkpoint'ами.
 - Физические изменения мира проверяют claims, protection (`is_protected`), и безопасную классификацию nodes.
 - GPS/tracking ссылается на каноническую физическую позицию (`anchor_pos` или `representative_route_pos`).
-- Старый 3D waypoint удалён. Трекинг использует `hud_elem_type = "waypoint"`.
+- Трекинг использует `type = "waypoint"` (серверный HUD-элемент, 3D beacon). GPS/радар — отдельный `type = "minimap"` HUD-элемент.
+- `aliveworld_core` **по mod.conf не зависит** от Mineclonia (`mod.conf` не указывает `depends = mcl_core`). Однако `route_materialization.lua` напрямую ссылается на `mcl_core:coarse_dirt` и другие Mineclonia node name'ы. Это известное несоответствие, которое необходимо устранить миграцией через bridge.
 - Environment-dependent тесты ждут awbot + emerge, а не флапают (см. `auto_run` в `aliveworld_test_suite/init.lua`).
 - Отсутствие внешнего предусловия (например, player offline) — не `ERROR`, а `SKIP`.
 
@@ -74,7 +73,18 @@ AliveWorld — серверный набор модов для **Luanti 5.16.1**
 | **luanti_testkit** | `local_mods/luanti_testkit/` | Универсальный серверный тестовый фреймворк (не зависит от AliveWorld) |
 | **aliveworld_test_suite** | `local_mods/aliveworld_test_suite/` | Тесты AliveWorld поверх TestKit, screenshot/ui_state management |
 
-Полные зависимости: `aliveworld_core` → `aliveworld_bridge_mcl` → `aliveworld_admin` + `aliveworld_player` + `aliveworld_world`.
+Зависимости по `mod.conf`:
+
+| Мод | Обязательные depends | optional_depends |
+|-----|---------------------|------------------|
+| `aliveworld_core` | _нет_ | _нет_ |
+| `aliveworld_bridge_mcl` | `aliveworld_core` | `mcl_core, mcl_mobs, mcl_villages, mcl_structures` |
+| `aliveworld_admin` | `aliveworld_core` | _нет_ |
+| `aliveworld_player` | `aliveworld_core` | `aliveworld_bridge_mcl, mcl_core` |
+| `aliveworld_world` | `aliveworld_core` | `aliveworld_bridge_mcl, aliveworld_player, mcl_core` |
+| `aliveworld_remote_controller` | _broken mod.conf (нет поля name)_ | _нет_ |
+| `luanti_testkit` | _нет_ | `aliveworld_core, aliveworld_player, aliveworld_world` |
+| `aliveworld_test_suite` | `luanti_testkit` | `aliveworld_core, aliveworld_player, aliveworld_world, aliveworld_bridge_mcl, aliveworld_admin` |
 
 ---
 
@@ -95,6 +105,8 @@ docker compose up -d
 - **port:** `30000/udp`
 - **команда:**
   `luantiserver --terminal --config /config/.minetest/minetest.conf --world /config/.minetest/worlds/aliveworld --gameid mineclonia --port 30000`
+- **config bind mount:** `./config/luanti.conf` → `/config/.minetest/minetest.conf`
+- **bind mounts для модов:** каждый `./local_mods/aliveworld_*` → `/config/.minetest/mods/`
 
 ### Подключение к ncurses-консоли
 
@@ -227,14 +239,15 @@ docker inspect luanti-aliveworld --format='{{json .Config.Cmd}}'
 # Чистый лог (основной)
 tail -100 data/debug.txt
 
-# Test mode лог
+# Test mode лог (если test mode запускался)
 tail -100 data/debug-test.txt
 
 # Поиск ошибок
 grep -i "ModError\|LuaError\|SCRIPT ERROR\|traceback\|ERROR" data/debug.txt | tail -30
 
-# Ограничить текущим запуском (по PID или временной метке)
-grep "2026-06-12 14:" data/debug.txt | grep -i error
+# Только текущий запуск: найти startup marker и показать с него
+grep -n "Server for gameid=" data/debug.txt | tail -1
+# Затем извлечь строки после этого маркера (например, через awk или tail +N)
 
 # TestKit отчёт
 grep '\[luanti_testkit\]' data/debug.txt | tail -50
@@ -244,7 +257,10 @@ grep '\[luanti_testkit\]' data/debug.txt | tail -50
 
 - Старый лог **нельзя принимать** за результат свежего запуска.
 - `debug.txt` не удалять без необходимости.
-- `debug-test.txt` автоматически перезаписывается при каждом запуске test mode (append mode).
+- `debug-test.txt` **дописывается (append mode)**, не перезаписывается. Для чистого лога перед test mode очистить вручную:
+  ```bash
+  : > data/debug-test.txt
+  ```
 - TestKit reports (`ltk_report_*.json`) не коммитить.
 
 ---
@@ -256,13 +272,23 @@ grep '\[luanti_testkit\]' data/debug.txt | tail -50
 Это экземпляр Luanti-клиента, подключающийся к серверу для выполнения тестов и скриншотов.
 
 ```bash
-# Запустить awbot
+# Запустить awbot (headless server-test client, --go, без xvfb по умолчанию)
 ./scripts/run-test-client.sh
 
-# Расширенный UI-менеджер (с xvfb, screenshot, daemon)
+# Расширенный UI-менеджер (с xvfb, screenshot, PID-файл, daemon)
 ./scripts/run-test-ui.sh start
 ./scripts/run-test-ui.sh daemon &   # polling daemon
 ```
+
+Различия и совместимость:
+
+| Скрипт | xvfb | PID-файл | Screenshot | Для чего |
+|--------|------|----------|------------|----------|
+| `run-test-client.sh` | нет (HEADLESS=1 использует xvfb-run если доступен) | нет | нет | Быстрый запуск для тестов, без UI |
+| `run-test-ui.sh start` | да (всегда xvfb-run) | `run/awbot.pid` | да | Screenshot/визуальная проверка |
+| `run-test-ui.sh daemon` | да | `run/awbot.pid` | да | Автоматический poll + restart |
+
+**Эти команды взаимоисключающие** — нельзя запустить два awbot с одним именем на одном сервере. `run-test-ui.sh` проверяет `run/awbot.pid` и отказывается запускаться, если процесс жив.
 
 ### Проверка подключения
 
@@ -301,7 +327,7 @@ echo '{"command":"teleport","pos":{"x":0,"y":4,"z":0},"player":"awbot"}' \
 
 ### Запуск двух awbot
 
-Избегать. PID-файл в `run/awbot.pid` защищает от дублирования (`run-test-ui.sh` проверяет).
+Избегать. PID-файл в `run/awbot.pid` защищает от дублирования (`run-test-ui.sh` проверяет). `run-test-client.sh` не проверяет PID — может создать дубликат; проверяйте `grep "awbot.*joins game"` перед запуском.
 
 ---
 
@@ -392,6 +418,8 @@ ls -t data/worlds/aliveworld/ltk_report_*.json | head -1
 
 ### Трактовка статусов
 
+### Трактовка статусов
+
 | Статус | Значение |
 |--------|----------|
 | PASS | Тест пройден |
@@ -459,6 +487,7 @@ ls -t data/worlds/aliveworld/ltk_report_*.json | head -1
 - `config/*` — конфиги
 - `scripts/*` — скрипты
 - `docs/*` — документация
+- `docker-compose.test.yml` — test mode override
 - `locks/content.lock.json` — замок версий
 - `secrets/awbot.password.example` — пример пароля
 - `data/worlds/aliveworld/world.mt` — конфиг мира
@@ -504,7 +533,7 @@ git diff --check
 - **Не force push.**
 - **Не push без явного указания пользователя.**
 - **Не amend** чужой commit без прямой необходимости и объяснения.
-- Если integration tests не запускались — явно указать в commit message.
+- Если integration tests не запускались — явно указать в итоговом отчёте; не утверждать полную готовность.
 - Не утверждать, что задача завершена, если основной критерий не проверен.
 
 ---
