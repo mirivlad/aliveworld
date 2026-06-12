@@ -20,6 +20,7 @@ services:
       - ./local_mods/aliveworld_test_suite:/config/.minetest/mods/aliveworld_test_suite
       - ./local_mods/aliveworld_world:/config/.minetest/mods/aliveworld_world
       - ./local_mods/luanti_testkit:/config/.minetest/mods/luanti_testkit
+      - ./local_mods/perfectworld:/config/.minetest/mods/perfectworld
     ports:
       - "30000:30000/udp"
     restart: unless-stopped
